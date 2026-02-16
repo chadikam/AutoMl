@@ -1,0 +1,906 @@
+/**
+ * Processed Dataset Charts Component - Essential ML Visualizations
+ * Only shows charts that provide real value for ML understanding
+ */
+import React, { useState } from 'react';
+import {
+  BarChart,
+  Bar,
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Cell,
+  ComposedChart,
+  ReferenceLine
+} from 'recharts';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './card';
+import { BarChart3, Activity, Target, Grid3x3, Layers, TrendingUp } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+const COLORS = ['#8b5cf6', '#6366f1', '#3b82f6', '#0ea5e9', '#06b6d4', '#14b8a6', '#10b981', '#84cc16'];
+
+const ProcessedDataCharts = ({ dataset, preview, originalPreview, originalEDA }) => {
+  const [activeChart, setActiveChart] = useState('overview');
+  
+  if (!dataset?.preprocessing_summary || !preview) {
+    return (
+      <div className="bg-card border rounded-2xl p-16 text-center">
+        <p className="text-muted-foreground">Preprocessing data required for visualizations</p>
+      </div>
+    );
+  }
+
+  const summary = dataset.preprocessing_summary;
+
+  // Chart sections (only the ones that matter)
+  const chartSections = [
+    { id: 'overview', label: 'Dataset Overview', icon: Layers },
+    { id: 'distributions', label: 'Feature Distributions', icon: Activity },
+    { id: 'correlation', label: 'Correlation Matrix', icon: Grid3x3 },
+    { id: 'importance', label: 'Feature Importance', icon: TrendingUp },
+    { id: 'target', label: 'Target Distribution', icon: Target },
+    { id: 'cardinality', label: 'Categorical Features', icon: BarChart3 },
+  ];
+
+  // 1. Dataset Overview (processed shape & types)
+  const getOverviewData = () => {
+    const numerical = summary.numerical_features?.length || 0;
+    const categorical = summary.categorical_features?.length || 0;
+    
+    return [
+      { name: 'Numerical', count: numerical, color: '#3b82f6' },
+      { name: 'Categorical', count: categorical, color: '#8b5cf6' },
+    ];
+  };
+
+  const getShapeData = () => {
+    const processed = summary.processed || {};
+    return [
+      { metric: 'Rows', value: processed.rows || 0 },
+      { metric: 'Columns', value: processed.columns || 0 },
+      { metric: 'Total Cells', value: (processed.rows || 0) * (processed.columns || 0) },
+    ];
+  };
+
+  // 2. Feature Distributions (Before vs After Scaling)
+  const getDistributionData = () => {
+    if (!preview.data || !originalPreview?.data) return [];
+    
+    const scaledCols = summary.scaled_columns || [];
+    const numericalFeatures = summary.numerical_features || [];
+    
+    // Get numerical features that were scaled
+    const featuresWithScaling = scaledCols.filter(col => numericalFeatures.includes(col)).slice(0, 8);
+    
+    return featuresWithScaling.map(col => {
+      // Before (original)
+      const originalValues = originalPreview.data
+        .map(row => parseFloat(row[col]))
+        .filter(v => !isNaN(v));
+      
+      // After (scaled)
+      const scaledValues = preview.data
+        .map(row => parseFloat(row[col]))
+        .filter(v => !isNaN(v));
+      
+      if (originalValues.length === 0 || scaledValues.length === 0) return null;
+      
+      const originalMean = originalValues.reduce((a, b) => a + b, 0) / originalValues.length;
+      const scaledMean = scaledValues.reduce((a, b) => a + b, 0) / scaledValues.length;
+      
+      const originalStd = Math.sqrt(
+        originalValues.reduce((sq, n) => sq + Math.pow(n - originalMean, 2), 0) / originalValues.length
+      );
+      const scaledStd = Math.sqrt(
+        scaledValues.reduce((sq, n) => sq + Math.pow(n - scaledMean, 2), 0) / scaledValues.length
+      );
+      
+      return {
+        name: col.length > 15 ? col.substring(0, 15) + '...' : col,
+        original_mean: parseFloat(originalMean.toFixed(2)),
+        original_std: parseFloat(originalStd.toFixed(2)),
+        scaled_mean: parseFloat(scaledMean.toFixed(2)),
+        scaled_std: parseFloat(scaledStd.toFixed(2)),
+      };
+    }).filter(Boolean);
+  };
+
+  // 3. Correlation Matrix (would come from backend)
+  const getCorrelationData = () => {
+    // This would ideally come from backend
+    return [];
+  };
+
+  // 4. Feature Importance (would come from baseline model)
+  const getFeatureImportanceData = () => {
+    // This would come from backend after training a baseline model
+    return [];
+  };
+
+  // 5. Target Distribution (for classification)
+  const getTargetDistribution = () => {
+    const targetCol = summary.target_column;
+    if (!targetCol || !preview.data) return [];
+    
+    const targetValues = preview.data.map(row => row[targetCol]).filter(v => v !== null && v !== undefined);
+    const uniqueValues = [...new Set(targetValues)];
+    
+    const distribution = uniqueValues.map(value => ({
+      class: String(value),
+      count: targetValues.filter(v => v === value).length,
+    }));
+    
+    return distribution.sort((a, b) => b.count - a.count);
+  };
+
+  // 6. Categorical Feature Cardinality
+  const getCategoricalCardinality = () => {
+    const categoricalFeatures = summary.categorical_features || [];
+    if (!preview.data || categoricalFeatures.length === 0) return [];
+    
+    return categoricalFeatures.slice(0, 10).map(col => {
+      const values = preview.data.map(row => row[col]).filter(v => v !== null && v !== undefined);
+      const uniqueCount = new Set(values).size;
+      
+      return {
+        name: col.length > 15 ? col.substring(0, 15) + '...' : col,
+        cardinality: uniqueCount,
+      };
+    }).sort((a, b) => b.cardinality - a.cardinality);
+  };
+
+  // 7. Skewness Correction (keep as requested)
+  const getSkewnessData = () => {
+    const skewnessDetails = summary.skewness_details || [];
+    return skewnessDetails.slice(0, 10).map(item => ({
+      name: item.column?.length > 15 ? item.column.substring(0, 15) + '...' : item.column,
+      before: parseFloat(item.original_skewness?.toFixed(2) || 0),
+      after: parseFloat(item.new_skewness?.toFixed(2) || 0),
+      transformed: item.transformed,
+    }));
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Chart Navigation */}
+      <div className="flex gap-2 overflow-x-auto pb-2">
+        {chartSections.map((section) => {
+          const Icon = section.icon;
+          return (
+            <button
+              key={section.id}
+              onClick={() => setActiveChart(section.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
+                activeChart === section.id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted hover:bg-muted/80'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {section.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Chart Content */}
+      <motion.div
+        key={activeChart}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
+        {/* 1. Dataset Overview */}
+        {activeChart === 'overview' && (
+          <div className="space-y-6">
+            {/* EDA-Based Missing Values from Original Dataset */}
+            {originalEDA && getMissingValuesByColumnFromEDA().length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-blue-500" />
+                    Missing Values - Original vs Processed
+                  </CardTitle>
+                  <CardDescription>
+                    From EDA analysis: {originalEDA?.missing_values?.total_missing || 0} missing values eliminated
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={getMissingValuesByColumnFromEDA()}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis 
+                        dataKey="column" 
+                        stroke="hsl(var(--muted-foreground))" 
+                        angle={-45}
+                        textAnchor="end"
+                        height={100}
+                      />
+                      <YAxis stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px'
+                        }}
+                        formatter={(value, name) => {
+                          if (name === 'count') return [value, 'Missing Values'];
+                          if (name === 'percentage') return [`${value}%`, 'Percentage'];
+                          return [value, name];
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="count" fill="#ef4444" name="Original Missing" radius={[8, 8, 0, 0]} />
+                      <ReferenceLine y={0} stroke="#10b981" strokeWidth={2} label="After Preprocessing: 0" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* EDA-Based Outlier Comparison */}
+            {originalEDA && getOutlierComparisonFromEDA().length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-orange-500" />
+                    Outlier Detection & Handling
+                  </CardTitle>
+                  <CardDescription>
+                    From EDA analysis: {originalEDA?.outliers?.total_columns_with_outliers || 0} columns had outliers
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={getOutlierComparisonFromEDA()}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="stage" stroke="hsl(var(--muted-foreground))" />
+                      <YAxis stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px'
+                        }}
+                      />
+                      <Bar dataKey="outliers" radius={[8, 8, 0, 0]}>
+                        {getOutlierComparisonFromEDA().map((entry, index) => (
+                          <Cell key={index} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* EDA-Based Skewness Comparison */}
+            {originalEDA && getDistributionSkewnessFromEDA().length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-purple-500" />
+                    Distribution Skewness Correction
+                  </CardTitle>
+                  <CardDescription>
+                    Yeo-Johnson transformation normalized {(summary.skewed_features_transformed || []).length} features
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <ComposedChart data={getDistributionSkewnessFromEDA()}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis 
+                        dataKey="column" 
+                        stroke="hsl(var(--muted-foreground))" 
+                        angle={-45}
+                        textAnchor="end"
+                        height={100}
+                      />
+                      <YAxis stroke="hsl(var(--muted-foreground))" label={{ value: '|Skewness|', angle: -90, position: 'insideLeft' }} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px'
+                        }}
+                        formatter={(value, name) => {
+                          if (name === 'before') return [value.toFixed(2), 'Before'];
+                          if (name === 'after') return [value.toFixed(2), 'After'];
+                          return [value, name];
+                        }}
+                      />
+                      <Legend />
+                      <ReferenceLine y={0.75} stroke="#f59e0b" strokeDasharray="3 3" label="Threshold" />
+                      <Bar dataKey="before" fill="#ef4444" name="Before Transform" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="after" fill="#10b981" name="After Transform" radius={[8, 8, 0, 0]} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Data Quality Score Evolution */}
+            {originalEDA && (
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                    Data Quality Improvement
+                  </CardTitle>
+                  <CardDescription>
+                    Overall quality metrics from EDA vs final processed dataset
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={getDataQualityEvolution()}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="metric" stroke="hsl(var(--muted-foreground))" />
+                      <YAxis stroke="hsl(var(--muted-foreground))" domain={[0, 100]} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px'
+                        }}
+                        formatter={(value) => `${value.toFixed(2)}%`}
+                      />
+                      <Legend />
+                      <Bar dataKey="original" fill="#94a3b8" name="Original (EDA)" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="processed" fill="#10b981" name="Processed" radius={[8, 8, 0, 0]} />
+                      <ReferenceLine y={90} stroke="#10b981" strokeDasharray="3 3" label="Excellent" />
+                      <ReferenceLine y={70} stroke="#f59e0b" strokeDasharray="3 3" label="Good" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                  
+                  {/* Improvement Summary */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                    {getDataQualityEvolution().map((item, index) => {
+                      const improvement = item.processed - item.original;
+                      return (
+                        <div key={index} className="p-4 bg-muted/30 rounded-lg">
+                          <p className="text-sm text-muted-foreground mb-1">{item.metric}</p>
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-2xl font-bold text-foreground">
+                              {item.processed.toFixed(1)}%
+                            </span>
+                            {improvement !== 0 && (
+                              <span className={`text-sm font-medium ${improvement > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                {improvement > 0 ? '+' : ''}{improvement.toFixed(1)}%
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            From {item.original.toFixed(1)}%
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Legacy missing values comparison (from preview data) */}
+            {!originalEDA && getMissingValuesComparison().length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Missing Values Reduction</CardTitle>
+                  <CardDescription>
+                    Columns with missing values before preprocessing (now filled or removed)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={getMissingValuesComparison()}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="column" stroke="hsl(var(--muted-foreground))" />
+                      <YAxis stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px'
+                        }}
+                        formatter={(value, name) => {
+                          if (name === 'before') return [value, 'Before'];
+                          return [value, 'After'];
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="before" fill="#ef4444" name="Missing Before" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="after" fill="#10b981" name="Missing After" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Outlier Reduction */}
+            {getOutlierReduction().length > 0 && changes.outliers_handled > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Outlier Handling</CardTitle>
+                  <CardDescription>
+                    IQR-based outlier capping reduced extreme values
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={getOutlierReduction()} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis type="number" stroke="hsl(var(--muted-foreground))" />
+                      <YAxis type="category" dataKey="stage" stroke="hsl(var(--muted-foreground))" width={150} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px'
+                        }}
+                      />
+                      <Bar dataKey="outliers" radius={[0, 8, 8, 0]}>
+                        {getOutlierReduction().map((entry, index) => (
+                          <Cell key={index} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Skewness Improvement */}
+            {getSkewnessImprovement().length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Skewness Improvement</CardTitle>
+                  <CardDescription>
+                    Log transformation reduced skewness in highly skewed features
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <ComposedChart data={getSkewnessImprovement()}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="column" stroke="hsl(var(--muted-foreground))" />
+                      <YAxis stroke="hsl(var(--muted-foreground))" label={{ value: 'Abs(Skewness)', angle: -90, position: 'insideLeft' }} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px'
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="before" fill="#ef4444" name="Before Log Transform" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="after" fill="#10b981" name="After Log Transform" radius={[8, 8, 0, 0]} />
+                      <Line type="monotone" dataKey="improvement" stroke="#8b5cf6" strokeWidth={2} name="Improvement" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-red-500/10 rounded-lg">
+                      <AlertTriangle className="w-5 h-5 text-red-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Outliers Handled</p>
+                      <p className="text-2xl font-bold">{changes.outliers_handled || 0}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Capped using IQR method
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-blue-500/10 rounded-lg">
+                      <CheckCircle className="w-5 h-5 text-blue-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Missing Filled</p>
+                      <p className="text-2xl font-bold">{changes.missing_values_filled || 0}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Mean/mode imputation
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-green-500/10 rounded-lg">
+                      <TrendingUp className="w-5 h-5 text-green-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Features Improved</p>
+                      <p className="text-2xl font-bold">{(summary.skewness_handled || []).length}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Skewness reduced via log transform
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Info message if no original data */}
+            {!originalPreview && !originalEDA && (
+              <div className="bg-muted/50 border border-dashed rounded-xl p-8 text-center">
+                <Info className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                <h4 className="font-semibold mb-1">Loading Original Data & EDA Results</h4>
+                <p className="text-sm text-muted-foreground">
+                  Before/after comparisons will appear once the original dataset and EDA analysis are loaded
+                </p>
+              </div>
+            )}
+
+            {/* Success message when EDA is loaded */}
+            {originalEDA && (
+              <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 text-center">
+                <CheckCircle className="w-6 h-6 text-green-500 mx-auto mb-2" />
+                <p className="text-sm text-green-700 dark:text-green-400 font-medium">
+                  ✓ Showing EDA-based comparisons from original dataset analysis
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Charts reflect actual improvements measured during preprocessing
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Feature Scaling Charts */}
+        {activeChart === 'scaling' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Feature Types Distribution */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Feature Types</CardTitle>
+                <CardDescription>
+                  Distribution of processed feature categories
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={getScalingData()}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" />
+                    <YAxis stroke="hsl(var(--muted-foreground))" />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Bar dataKey="count" radius={[8, 8, 0, 0]}>
+                      {getScalingData().map((entry, index) => (
+                        <Cell key={index} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            {/* Scaled Features Distribution */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Scaled Features Statistics</CardTitle>
+                <CardDescription>
+                  Mean and standard deviation after scaling (sample)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={getFeatureDistribution()}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" angle={-45} textAnchor="end" height={80} />
+                    <YAxis stroke="hsl(var(--muted-foreground))" />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Legend />
+                    <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+                    <Bar dataKey="mean" fill="#3b82f6" name="Mean" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="std" fill="#10b981" name="Std Dev" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Encoding Impact Charts */}
+        {activeChart === 'encoding' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Dataset Size Comparison */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Dataset Dimensions</CardTitle>
+                <CardDescription>
+                  Shape changes after preprocessing
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <ComposedChart data={getSizeComparisonData()}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="stage" stroke="hsl(var(--muted-foreground))" />
+                    <YAxis stroke="hsl(var(--muted-foreground))" />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Legend />
+                    <Bar dataKey="rows" fill="#3b82f6" name="Rows" radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="columns" fill="#8b5cf6" name="Columns" radius={[8, 8, 0, 0]} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            {/* Processing Changes */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Processing Changes</CardTitle>
+                <CardDescription>
+                  Count of transformations applied
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={getChangesData()} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" />
+                    <YAxis dataKey="name" type="category" stroke="hsl(var(--muted-foreground))" width={120} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Bar dataKey="value" radius={[0, 8, 8, 0]}>
+                      {getChangesData().map((entry, index) => (
+                        <Cell key={index} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Data Quality Charts */}
+        {activeChart === 'quality' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Quality Metrics Comparison */}
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="text-lg">Data Quality Improvement</CardTitle>
+                <CardDescription>
+                  Before and after preprocessing comparison
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={350}>
+                  <BarChart data={getQualityData()}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="metric" stroke="hsl(var(--muted-foreground))" />
+                    <YAxis stroke="hsl(var(--muted-foreground))" domain={[0, 100]} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px'
+                      }}
+                      formatter={(value) => `${value.toFixed(2)}%`}
+                    />
+                    <Legend />
+                    <Bar dataKey="before" fill="#94a3b8" name="Before" radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="after" fill="#10b981" name="After" radius={[8, 8, 0, 0]} />
+                    <ReferenceLine y={90} stroke="#10b981" strokeDasharray="3 3" label="Good" />
+                    <ReferenceLine y={70} stroke="#f59e0b" strokeDasharray="3 3" label="Fair" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            {/* Quality Summary Cards */}
+            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4">
+              {getQualityData().map((metric, index) => {
+                const improvement = metric.after - metric.before;
+                const isImproved = improvement > 0;
+                
+                return (
+                  <Card key={index}>
+                    <CardContent className="pt-6">
+                      <div className="flex items-start justify-between mb-2">
+                        <h4 className="font-medium text-sm text-muted-foreground">{metric.metric}</h4>
+                        {isImproved ? (
+                          <CheckCircle className="w-5 h-5 text-green-500" />
+                        ) : improvement < 0 ? (
+                          <AlertTriangle className="w-5 h-5 text-amber-500" />
+                        ) : (
+                          <Info className="w-5 h-5 text-blue-500" />
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-2xl font-bold">{metric.after.toFixed(2)}%</span>
+                          {improvement !== 0 && (
+                            <span className={`text-sm font-medium ${isImproved ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {isImproved ? '+' : ''}{improvement.toFixed(2)}%
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          From {metric.before.toFixed(2)}%
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Feature Distribution Charts */}
+        {activeChart === 'distribution' && (
+          <div className="grid grid-cols-1 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Scaled Features Min-Max Range</CardTitle>
+                <CardDescription>
+                  Value ranges after StandardScaler transformation
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={400}>
+                  <ScatterChart>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis
+                      type="number"
+                      dataKey="min"
+                      name="Minimum"
+                      stroke="hsl(var(--muted-foreground))"
+                      label={{ value: 'Minimum Value', position: 'insideBottom', offset: -5 }}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="max"
+                      name="Maximum"
+                      stroke="hsl(var(--muted-foreground))"
+                      label={{ value: 'Maximum Value', angle: -90, position: 'insideLeft' }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px'
+                      }}
+                      cursor={{ strokeDasharray: '3 3' }}
+                    />
+                    <Legend />
+                    <Scatter
+                      name="Features"
+                      data={getFeatureDistribution()}
+                      fill="#8b5cf6"
+                    >
+                      {getFeatureDistribution().map((entry, index) => (
+                        <Cell key={index} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Scatter>
+                    <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+                    <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            {/* Info cards about feature types */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-blue-500/10 rounded-lg">
+                      <Activity className="w-5 h-5 text-blue-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Scaled</p>
+                      <p className="text-2xl font-bold">{(summary.scaled_columns || []).length}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    StandardScaler (mean=0, std=1)
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-green-500/10 rounded-lg">
+                      <CheckCircle className="w-5 h-5 text-green-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Datetime</p>
+                      <p className="text-2xl font-bold">{(summary.datetime_features || []).length}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Kept as integers (unscaled)
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-purple-500/10 rounded-lg">
+                      <BarChart3 className="w-5 h-5 text-purple-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Encoded</p>
+                      <p className="text-2xl font-bold">{changes.categorical_columns_encoded || 0}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    One-hot or label encoded
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-cyan-500/10 rounded-lg">
+                      <TrendingUp className="w-5 h-5 text-cyan-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Created</p>
+                      <p className="text-2xl font-bold">{changes.new_features_created || 0}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    New engineered features
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+};
+
+export default ProcessedDataCharts;
