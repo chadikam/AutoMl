@@ -1,8 +1,8 @@
 /**
  * Dataset upload page with EDA
  */
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { datasetsAPI } from '../utils/api';
 import EDAProgressLog from '../components/ui/eda-progress-log';
@@ -11,6 +11,10 @@ import EDACharts from '../components/ui/eda-charts';
 import { Check, X, Search, Columns3 } from 'lucide-react';
 
 const DatasetUpload = () => {
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const datasetId = searchParams.get('dataset');
+  
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -29,6 +33,39 @@ const DatasetUpload = () => {
   const [uploadedDatasetInfo, setUploadedDatasetInfo] = useState(null); // Store initial dataset info
   const [savingColumns, setSavingColumns] = useState(false);
   const navigate = useNavigate();
+
+  // Load existing dataset for re-analysis if dataset ID is provided
+  useEffect(() => {
+    if (datasetId) {
+      loadExistingDataset(datasetId);
+    }
+  }, [datasetId]);
+
+  const loadExistingDataset = async (id) => {
+    try {
+      setLoading(true);
+      const data = await datasetsAPI.get(id);
+      
+      // Use the ID from the URL parameter (it's the valid one we just used to fetch)
+      setUploadedDatasetId(id);
+      setUploadedDatasetInfo(data);
+      
+      // Initialize with currently selected columns or all columns
+      if (data?.selected_columns && data.selected_columns.length > 0) {
+        setSelectedColumns(data.selected_columns);
+      } else if (data?.column_names) {
+        setSelectedColumns(data.column_names);
+      }
+      
+      // Skip directly to column selection
+      setUploadPhase('selecting');
+    } catch (error) {
+      console.error('Failed to load dataset:', error);
+      setError('Failed to load dataset for re-analysis');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleChange = (e) => {
     setFormData({
@@ -120,8 +157,9 @@ const DatasetUpload = () => {
       await runEDAWithProgress(selectedColumns);
     } catch (error) {
       console.error('Failed to run EDA:', error);
-      setError('Failed to analyze dataset. Please try again.');
-      setUploadPhase('idle');
+      const detail = error?.response?.data?.detail || error?.message || 'Unknown error';
+      setError(`Failed to analyze dataset: ${detail}`);
+      setUploadPhase('selecting');
     } finally {
       setSavingColumns(false);
     }
@@ -141,8 +179,9 @@ const DatasetUpload = () => {
       await runEDAWithProgress(allColumns);
     } catch (error) {
       console.error('Failed to run EDA:', error);
-      setError('Failed to analyze dataset. Please try again.');
-      setUploadPhase('idle');
+      const detail = error?.response?.data?.detail || error?.message || 'Unknown error';
+      setError(`Failed to analyze dataset: ${detail}`);
+      setUploadPhase('selecting');
     } finally {
       setSavingColumns(false);
     }
@@ -259,9 +298,14 @@ const DatasetUpload = () => {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-4xl font-bold">Upload Dataset</h1>
+        <h1 className="text-4xl font-bold">
+          {datasetId ? 'Re-analyze Dataset' : 'Upload Dataset'}
+        </h1>
         <p className="mt-2 text-muted-foreground">
-          Upload a CSV file to start analyzing and training models
+          {datasetId 
+            ? 'Select the columns you want to include in the analysis' 
+            : 'Upload a CSV file to start analyzing and training models'
+          }
         </p>
       </div>
 
@@ -512,7 +556,13 @@ const DatasetUpload = () => {
               <div className="flex gap-3 justify-end pt-4 border-t">
                 <button
                   onClick={async () => {
-                    // Delete the uploaded dataset from backend before canceling
+                    // In re-analysis mode, just navigate back
+                    if (datasetId) {
+                      navigate('/dashboard/datasets');
+                      return;
+                    }
+                    
+                    // In new upload mode, delete the uploaded dataset before canceling
                     if (uploadedDatasetId) {
                       try {
                         await datasetsAPI.delete(uploadedDatasetId);

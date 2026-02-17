@@ -330,7 +330,7 @@ const DatasetDetail = () => {
 
       {/* Delete Confirmation Dialog */}
       {showDeleteDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDeleteDialog(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center" style={{ zIndex: 99999, marginTop: 0 }} onClick={() => setShowDeleteDialog(false)}>
           <div className="bg-card border rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start gap-4">
               <div className="p-3 bg-red-500/10 rounded-lg shrink-0">

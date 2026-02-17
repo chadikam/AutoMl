@@ -13,6 +13,7 @@ const DatasetsList = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [deleteDialogDataset, setDeleteDialogDataset] = useState(null);
+  const [cascadeDeleteDialog, setCascadeDeleteDialog] = useState(null); // For cascade warning
   const [editDialogDataset, setEditDialogDataset] = useState(null);
   const [editFormData, setEditFormData] = useState({ name: '', description: '' });
   const [selectedDatasets, setSelectedDatasets] = useState([]);
@@ -39,16 +40,45 @@ const DatasetsList = () => {
     }
   };
 
-  const handleDelete = async (datasetId) => {
+  const handleDelete = async (datasetId, cascade = false) => {
     setIsDeleting(true);
+    let hasError = false;
+    let errorStatus = null;
     try {
-      await datasetsAPI.delete(datasetId);
+      await datasetsAPI.delete(datasetId, cascade);
       fetchDatasets();
+      setDeleteDialogDataset(null);
     } catch (error) {
+      hasError = true;
+      errorStatus = error.response?.status;
       console.error('Failed to delete dataset:', error);
+      
+      // Check if error is due to preprocessing data existing
+      if (error.response?.status === 409) {
+        // Show cascade delete warning
+        const dataset = datasets.find(d => d.id === datasetId);
+        setCascadeDeleteDialog(dataset);
+        setDeleteDialogDataset(null);
+      } else {
+        alert('Failed to delete dataset. Please try again.');
+        setDeleteDialogDataset(null);
+      }
     } finally {
       setIsDeleting(false);
-      setDeleteDialogDataset(null);
+    }
+  };
+
+  const handleCascadeDelete = async (datasetId) => {
+    setIsDeleting(true);
+    try {
+      await datasetsAPI.delete(datasetId, true); // cascade = true
+      fetchDatasets();
+      setCascadeDeleteDialog(null);
+    } catch (error) {
+      console.error('Failed to cascade delete dataset:', error);
+      alert('Failed to delete dataset. Please try again.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -415,10 +445,10 @@ const DatasetsList = () => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/dashboard/datasets/${dataset.id}`);
+                            navigate(`/dashboard/datasets/upload?dataset=${dataset.id}`);
                           }}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary/90 transition-colors"
-                          title={dataset.eda_results ? "View/Re-run analysis" : "Run analysis"}
+                          title={dataset.eda_results ? "Re-analyze dataset" : "Analyze dataset"}
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -596,6 +626,69 @@ const DatasetsList = () => {
                     className="px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isDeleting ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Cascade Delete Warning Dialog */}
+      {cascadeDeleteDialog && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center" style={{ zIndex: 99999 }} onClick={() => setCascadeDeleteDialog(null)}>
+          <div className="bg-card border rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-orange-500/10 rounded-lg shrink-0">
+                <svg className="w-6 h-6 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold mb-2">Delete Dataset & Processed Version</h3>
+                <p className="text-muted-foreground mb-4">
+                  This dataset has a processed version. Deleting it will also delete:
+                </p>
+                <div className="bg-muted/50 rounded-lg p-3 mb-4">
+                  <ul className="space-y-1 text-sm text-muted-foreground">
+                    <li className="flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Original dataset
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Processed dataset
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Preprocessing pipeline
+                    </li>
+                  </ul>
+                </div>
+                <p className="text-sm text-muted-foreground mb-6">
+                  This action cannot be undone. Are you sure?
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setCascadeDeleteDialog(null)}
+                    disabled={isDeleting}
+                    className="px-4 py-2 rounded-lg font-medium bg-muted hover:bg-muted/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleCascadeDelete(cascadeDeleteDialog.id)}
+                    disabled={isDeleting}
+                    className="px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isDeleting ? 'Deleting...' : 'Delete Both'}
                   </button>
                 </div>
               </div>

@@ -1178,17 +1178,25 @@ export default function PreprocessDataset() {
             <div className="grid grid-cols-3 gap-3 pt-4 border-t">
               {/* Skip All Rare Values - Quick Action */}
               <button
-                onClick={() => {
+                type="button"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
                   // Skip all columns and proceed
                   setRareValueSelections({});
                   rareValueSelectionsRef.current = {};
                   const taskTypeToUse = detectedTaskTypeRef.current;
-                  checkForOutliers(taskTypeToUse).then(hasOutliers => {
+                  try {
+                    const hasOutliers = await checkForOutliers(taskTypeToUse);
                     if (!hasOutliers) {
                       setTaskType(taskTypeToUse);
                       startPreprocessing(dataset);
                     }
-                  });
+                  } catch (error) {
+                    console.error('Error checking outliers:', error);
+                    setTaskType(taskTypeToUse);
+                    startPreprocessing(dataset);
+                  }
                 }}
                 className="px-4 py-3 bg-background hover:bg-muted border rounded-lg transition-colors font-medium text-sm"
               >
@@ -1197,7 +1205,12 @@ export default function PreprocessDataset() {
 
               {/* Skip This Column */}
               <button
-                onClick={handleSkipColumn}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSkipColumn();
+                }}
                 className="px-4 py-3 bg-background hover:bg-muted border rounded-lg transition-colors font-medium text-sm"
               >
                 Skip Column
@@ -1205,7 +1218,12 @@ export default function PreprocessDataset() {
 
               {/* Confirm/Next */}
               <button
-                onClick={handleRareValueDecision}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleRareValueDecision();
+                }}
                 disabled={Object.values(selectedRareValues).every(v => !v)}
                 className="px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               >

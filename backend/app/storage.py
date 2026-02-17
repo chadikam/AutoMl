@@ -178,7 +178,7 @@ class JsonStore:
     async def update_one(self, query: Dict, update: Dict):
         """
         Update a single document matching the query.
-        Supports MongoDB-style $set and $inc operators, 
+        Supports MongoDB-style $set, $inc, and $unset operators, 
         or plain dict for direct field updates.
         """
         async with self._lock:
@@ -193,7 +193,26 @@ class JsonStore:
                         for key, value in update["$inc"].items():
                             current = self._get_nested(doc, key, 0)
                             self._set_nested(doc, key, current + value)
-                    if "$set" not in update and "$inc" not in update:
+                    if "$unset" in update:
+                        for key in update["$unset"].keys():
+                            # Remove the field from the document
+                            if '.' in key:
+                                # Handle nested keys
+                                parts = key.split('.')
+                                current = doc
+                                for part in parts[:-1]:
+                                    if isinstance(current, dict) and part in current:
+                                        current = current[part]
+                                    else:
+                                        break
+                                else:
+                                    if isinstance(current, dict) and parts[-1] in current:
+                                        del current[parts[-1]]
+                            else:
+                                # Simple key
+                                if key in doc:
+                                    del doc[key]
+                    if "$set" not in update and "$inc" not in update and "$unset" not in update:
                         # Plain update (direct field assignment)
                         for key, value in update.items():
                             if not key.startswith('$'):

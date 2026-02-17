@@ -22,7 +22,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
-import { datasetsAPI, modelsAPI } from '../utils/api';
+import { datasetsAPI, automlAPI } from '../utils/api';
 
 const DashboardHome = () => {
   const [datasets, setDatasets] = useState([]);
@@ -37,7 +37,7 @@ const DashboardHome = () => {
     try {
       const [datasetsData, modelsData] = await Promise.all([
         datasetsAPI.list(),
-        modelsAPI.list(),
+        automlAPI.listModels(),
       ]);
       setDatasets(datasetsData);
       setModels(modelsData);
@@ -62,8 +62,8 @@ const DashboardHome = () => {
   }
 
   const totalModels = models.length;
-  const processedDatasets = datasets.filter(d => d.is_preprocessed).length;
-  const bestAccuracy = models.length > 0 ? Math.max(...models.map(m => m.accuracy)) * 100 : 0;
+  const processedDatasets = datasets.filter(d => d.preprocessing_summary).length;
+  const bestAccuracy = models.length > 0 ? Math.max(...models.map(m => m.best_test_score || 0)) * 100 : 0;
 
   const statCards = [
     {
@@ -167,7 +167,7 @@ const DashboardHome = () => {
           const Icon = stat.icon;
           return (
             <Link key={index} to={stat.link}>
-              <Card className={`border-2 ${stat.borderColor} hover:shadow-lg transition-all duration-300 hover:-translate-y-1 cursor-pointer group`}>
+              <Card className={`border-2 ${stat.borderColor} hover:shadow-lg transition-all duration-300 cursor-pointer group`}>
                 <CardContent className="p-6">
                   <div className="flex items-start justify-between">
                     <div className="space-y-2">
@@ -207,7 +207,7 @@ const DashboardHome = () => {
             const Icon = action.icon;
             return (
               <Link key={index} to={action.link}>
-                <Card className="hover:shadow-md transition-all duration-300 hover:-translate-y-1 cursor-pointer group border-2">
+                <Card className="hover:shadow-md transition-all duration-300 cursor-pointer group border-2">
                   <CardContent className="p-6">
                     <div className={`w-12 h-12 rounded-xl ${action.bgColor} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
                       <Icon className={`w-6 h-6 ${action.color}`} />
@@ -252,8 +252,13 @@ const DashboardHome = () => {
                           <h3 className="font-semibold text-lg">{model.name}</h3>
                           <div className="flex items-center gap-2 mt-1">
                             <Badge variant="secondary" className="text-xs">
-                              {model.model_type.replace('_', ' ')}
+                              {model.task_type || 'Unknown'}
                             </Badge>
+                            {model.best_model_type && (
+                              <Badge variant="outline" className="text-xs">
+                                {model.best_model_type}
+                              </Badge>
+                            )}
                             <span className="text-xs text-muted-foreground flex items-center gap-1">
                               <Clock className="w-3 h-3" />
                               {new Date(model.created_at).toLocaleDateString()}
@@ -263,7 +268,7 @@ const DashboardHome = () => {
                       </div>
                       <div className="text-right">
                         <p className="text-2xl font-bold text-green-600">
-                          {(model.accuracy * 100).toFixed(1)}%
+                          {((model.best_test_score || 0) * 100).toFixed(1)}%
                         </p>
                         <p className="text-xs text-muted-foreground">Accuracy</p>
                       </div>

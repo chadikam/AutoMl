@@ -97,8 +97,8 @@ export const datasetsAPI = {
     return response.data;
   },
 
-  delete: async (datasetId) => {
-    const response = await apiClient.delete(`/api/datasets/${datasetId}`);
+  delete: async (datasetId, cascade = false) => {
+    const response = await apiClient.delete(`/api/datasets/${datasetId}?cascade=${cascade}`);
     return response.data;
   },
 

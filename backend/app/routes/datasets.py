@@ -1040,13 +1040,15 @@ async def get_dataset(
 
 @router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_dataset(
-    dataset_id: str
+    dataset_id: str,
+    cascade: bool = False
 ):
     """
     Delete a dataset
     
     Args:
         dataset_id: Dataset ID
+        cascade: If True, also delete preprocessing data. If False and preprocessing exists, will raise error.
     
     Raises:
         HTTPException: If dataset not found or access denied
@@ -1069,30 +1071,31 @@ async def delete_dataset(
             detail="Dataset not found"
         )
     
-    # Delete original file from disk (but keep preprocessed file if it exists)
-    if os.path.exists(dataset["file_path"]):
+    # Check if dataset has preprocessing data and cascade is False
+    if dataset.get("preprocessing_summary") and not cascade:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Dataset has preprocessing data. Use cascade=true to delete both, or delete preprocessing first."
+        )
+    
+    # Delete original file from disk
+    if dataset.get("file_path") and os.path.exists(dataset["file_path"]):
         os.remove(dataset["file_path"])
     
-    # Update database: Mark as deleted but keep preprocessing data
-    # This allows preprocessed datasets to remain accessible even after original is deleted
-    if dataset.get("preprocessing_summary"):
-        # If dataset has been preprocessed, just mark the original as deleted
-        # instead of removing the entire document
-        await datasets_store.update_one(
-            {"_id": dataset_id},
-            {
-                "$set": {
-                    "original_deleted": True,
-                    "original_deleted_at": datetime.now(timezone.utc)
-                },
-                "$unset": {
-                    "file_path": ""  # Remove reference to deleted original file
-                }
-            }
-        )
-    else:
-        # If dataset was never preprocessed, delete it completely
-        await datasets_store.delete_one({"_id": dataset_id})
+    # If cascade delete, also remove preprocessing data
+    if cascade and dataset.get("preprocessing_summary"):
+        # Delete preprocessed file from disk if it exists
+        if dataset.get("preprocessed_file_path") and os.path.exists(dataset["preprocessed_file_path"]):
+            os.remove(dataset["preprocessed_file_path"])
+        
+        # Delete preprocessing pipeline file if it exists
+        if dataset.get("preprocessing_summary", {}).get("pipeline_path"):
+            pipeline_path = dataset["preprocessing_summary"]["pipeline_path"]
+            if os.path.exists(pipeline_path):
+                os.remove(pipeline_path)
+    
+    # Delete the entire document
+    await datasets_store.delete_one({"_id": dataset_id})
     
     return None
 
@@ -2342,6 +2345,7 @@ async def preprocess_dataset(
                 "task_type": results['task_type'],
                 "model_family": results['model_family'],
                 "target_column": target_column,
+                "columns_used": original_columns,  # Track which columns were included in preprocessing
                 "feature_names": results['feature_names'],
                 "numerical_features": metadata['numerical_features'],
                 "categorical_features": metadata['categorical_features'],

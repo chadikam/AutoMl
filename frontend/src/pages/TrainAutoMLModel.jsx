@@ -3,7 +3,7 @@
  * Step-by-step wizard for training AutoML models with generalization focus
  */
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft,
   ChevronRight,
@@ -140,6 +140,56 @@ export default function TrainAutoMLModel() {
     }).catch(() => {});
   }, []);
 
+  // Navigation guard: Prevent user from leaving page during training
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (training && currentTrainingId) {
+        e.preventDefault();
+        e.returnValue = 'Model training is in progress. If you leave, the training will be cancelled. Are you sure?';
+        
+        // Attempt to cancel training on page unload (browser refresh/close)
+        // Using fetch with keepalive flag for reliability during page unload
+        try {
+          fetch(`http://localhost:8000/api/automl/cancel/${currentTrainingId}`, {
+            method: 'POST',
+            keepalive: true,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({}),
+          }).catch(() => {
+            // Ignore errors during unload
+          });
+        } catch (err) {
+          console.error('Failed to cancel training on unload:', err);
+        }
+        
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [training, currentTrainingId]);
+
+  // Cancel training when component unmounts (in-app navigation)
+  useEffect(() => {
+    return () => {
+      if (training && currentTrainingId) {
+        // Cancel training when navigating away
+        automlAPI.cancelTraining(currentTrainingId).catch(err => {
+          console.error('Failed to cancel training on unmount:', err);
+        });
+        
+        // Stop polling
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+      }
+    };
+  }, [training, currentTrainingId]);
+
   const fetchProcessedDatasets = async () => {
     try {
       setLoading(true);
@@ -161,9 +211,16 @@ export default function TrainAutoMLModel() {
   const handleDatasetSelect = (datasetId) => {
     const dataset = processedDatasets.find(d => d.id === datasetId);
     setSelectedDataset(dataset);
+    
+    // Autofill name and description from dataset (user can still change them)
+    const autoName = dataset?.name ? `${dataset.name} - AutoML Model` : '';
+    const autoDescription = dataset?.description || `AutoML model trained on ${dataset?.name || 'dataset'}`;
+    
     setFormData({ 
       ...formData, 
       dataset_id: datasetId,
+      name: formData.name || autoName,  // Only autofill if empty
+      description: formData.description || autoDescription,  // Only autofill if empty
     });
   };
 
@@ -395,36 +452,6 @@ export default function TrainAutoMLModel() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Model Information</CardTitle>
-              <CardDescription>
-                Give your AutoML model a name and description
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Model Name *</Label>
-                <Input
-                  id="name"
-                  placeholder="e.g., Fraud Detection Model"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Description (Optional)</Label>
-                <Textarea
-                  id="description"
-                  placeholder="Describe what this model will predict..."
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  rows={3}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <CardTitle>Select Processed Dataset</CardTitle>
               <CardDescription>
                 Choose from datasets that have been preprocessed and are ready for training
@@ -490,6 +517,36 @@ export default function TrainAutoMLModel() {
                   </DropdownMenu>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Model Information</CardTitle>
+              <CardDescription>
+                Give your AutoML model a name and description (auto-filled from dataset, but you can change them)
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Model Name *</Label>
+                <Input
+                  id="name"
+                  placeholder="e.g., Fraud Detection Model"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="description">Description (Optional)</Label>
+                <Textarea
+                  id="description"
+                  placeholder="Describe what this model will predict..."
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  rows={3}
+                />
+              </div>
             </CardContent>
           </Card>
 

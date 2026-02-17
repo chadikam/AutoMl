@@ -33,6 +33,13 @@ const ProcessedDatasets = () => {
     fetchDatasets();
   }, []);
 
+  // Refetch when user navigates to this page
+  useEffect(() => {
+    if (location.pathname === '/dashboard/processed') {
+      fetchDatasets();
+    }
+  }, [location.pathname]);
+
   // Refetch when navigation state indicates a refresh is needed
   useEffect(() => {
     if (location.state?.refresh) {
@@ -68,10 +75,29 @@ const ProcessedDatasets = () => {
     }
   };
 
-  const handleRefresh = () => {
-    setLoading(true);
-    fetchDatasets();
+  // Helper function to check if a processed dataset is outdated
+  const isDatasetOutdated = (dataset) => {
+    if (!dataset.preprocessing_summary) return false;
+    
+    // Get the original dataset 
+    const original = allDatasets.find(d => d.id === dataset.id);
+    if (!original) return false;
+    
+    // Check if the selected_columns used during preprocessing are different from current
+    const preprocessedColumns = dataset.preprocessing_summary.columns_used || [];
+    const currentColumns = original.selected_columns || original.column_names || [];
+    
+    // If columns_used was never tracked, can't determine outdated status
+    if (preprocessedColumns.length === 0) return false;
+    
+    // Compare as sorted arrays to ignore order differences
+    const preprocessedSorted = [...preprocessedColumns].sort().join(',');
+    const currentSorted = [...currentColumns].sort().join(',');
+    
+    return preprocessedSorted !== currentSorted;
   };
+
+
 
   const handleSelectAll = () => {
     if (selectedDatasets.length === paginatedDatasets.length) {
@@ -102,10 +128,8 @@ const ProcessedDatasets = () => {
       // Delete preprocessing data from backend
       await datasetsAPI.deletePreprocessing(datasetId);
       
-      // Remove from local state
-      const updatedProcessed = processedDatasets.filter(d => d.id !== datasetId);
-      setProcessedDatasets(updatedProcessed);
-      setAllDatasets(updatedProcessed);
+      // Refetch datasets to get updated list from server
+      await fetchDatasets();
       
       setDeleteDialogDataset(null);
     } catch (error) {
@@ -162,12 +186,11 @@ const ProcessedDatasets = () => {
         selectedDatasets.map(datasetId => datasetsAPI.deletePreprocessing(datasetId))
       );
       
-      // Remove from local state
-      const updatedProcessed = processedDatasets.filter(d => !selectedDatasets.includes(d.id));
-      setProcessedDatasets(updatedProcessed);
-      setAllDatasets(updatedProcessed);
+      // Refetch datasets to get updated list from server
+      await fetchDatasets();
       
       setSelectedDatasets([]);
+      setShowBulkDeleteDialog(false);
     } catch (error) {
       console.error('Failed to delete preprocessing data:', error);
       alert('Failed to delete some datasets. Please try again.');
@@ -328,16 +351,6 @@ const ProcessedDatasets = () => {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={handleRefresh}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium bg-secondary hover:bg-secondary/80 border-2 border-secondary shadow-sm hover:shadow-md transition-all"
-            title="Refresh dataset list"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Refresh
-          </button>
           <button
             onClick={() => setShowPreprocessModal(true)}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium bg-primary hover:bg-primary/90 border-2 border-primary shadow-sm hover:shadow-md transition-all text-primary-foreground dark:text-white"
@@ -575,6 +588,14 @@ const ProcessedDatasets = () => {
                                     {dataset.preprocessing_summary.task_type.charAt(0).toUpperCase() + dataset.preprocessing_summary.task_type.slice(1)}
                                   </span>
                                 )}
+                                {isDatasetOutdated(dataset) && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Outdated
+                                  </span>
+                                )}
                                 {dataset.preprocessing_summary?.has_train_test_split && (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -611,20 +632,33 @@ const ProcessedDatasets = () => {
                         </td>
                         <td className="relative whitespace-nowrap py-2 pl-3 pr-6 text-right">
                           <div className="flex items-center gap-2 justify-end">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handlePreprocessClick(dataset);
-                              }}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary/90 transition-colors"
-                              title="View preprocessing details"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                              </svg>
-                              <span className="text-white">Analyze</span>
-                            </button>
+                            {isDatasetOutdated(dataset) ? (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handlePreprocessClick(dataset);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 transition-colors"
+                                title="Re-process dataset (columns were modified)"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                <span className="text-white">Re-process</span>
+                              </button>
+                            ) : (
+                              <button
+                                disabled
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground bg-muted cursor-not-allowed opacity-60"
+                                title="Processing is up to date. Modify columns in the Datasets page to enable re-processing."
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                <span>Process</span>
+                              </button>
+                            )}
                             
                             {/* 3-dot menu */}
                             <div className="relative">
@@ -920,7 +954,7 @@ const ProcessedDatasets = () => {
 
       {/* Delete Confirmation Dialog */}
       {deleteDialogDataset && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center" style={{ zIndex: 99999 }} onClick={() => setDeleteDialogDataset(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center" style={{ zIndex: 99999, marginTop: 0 }} onClick={() => setDeleteDialogDataset(null)}>
           <div className="bg-card border rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start gap-4">
               <div className="p-3 bg-red-500/10 rounded-lg shrink-0">
@@ -959,7 +993,7 @@ const ProcessedDatasets = () => {
 
       {/* Bulk Delete Confirmation Dialog */}
       {showBulkDeleteDialog && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center" style={{ zIndex: 99999 }} onClick={() => setShowBulkDeleteDialog(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center" style={{ zIndex: 99999, marginTop: 0 }} onClick={() => setShowBulkDeleteDialog(false)}>
           <div className="bg-card border rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start gap-4">
               <div className="p-3 bg-red-500/10 rounded-lg shrink-0">
