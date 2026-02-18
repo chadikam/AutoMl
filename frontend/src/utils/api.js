@@ -305,6 +305,13 @@ export const automlAPI = {
     return response.data;
   },
 
+  exportModel: async (modelId) => {
+    const response = await apiClient.get(`/api/automl/models/${modelId}/export`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+
   predict: async (modelId, inputData) => {
     const response = await apiClient.post(`/api/automl/models/${modelId}/predict`, inputData);
     return response.data;

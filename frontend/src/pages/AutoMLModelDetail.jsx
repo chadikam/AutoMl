@@ -7,6 +7,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   Download,
+  Package,
   Trash2,
   Trophy,
   TrendingUp,
@@ -89,6 +90,27 @@ export default function AutoMLModelDetail() {
       link.remove();
     } catch (err) {
       alert('Failed to download model');
+    }
+  };
+
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportPackage = async () => {
+    setExporting(true);
+    try {
+      const blob = await automlAPI.exportModel(id);
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'application/zip' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${model.name.replace(/\s+/g, '_')}_deployment_package.zip`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Failed to export package. Please try again.');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -205,7 +227,15 @@ export default function AutoMLModelDetail() {
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={handleDownload}>
             <Download className="h-4 w-4 mr-2" />
-            Download
+            Download .pkl
+          </Button>
+          <Button variant="outline" onClick={handleExportPackage} disabled={exporting}>
+            {exporting ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Package className="h-4 w-4 mr-2" />
+            )}
+            {exporting ? 'Building...' : 'Export Package'}
           </Button>
           <Button
             variant="destructive"

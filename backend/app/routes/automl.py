@@ -11,7 +11,7 @@ This endpoint provides AutoML training with:
 """
 
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from typing import List, Optional
 import pandas as pd
 import numpy as np
@@ -852,6 +852,73 @@ async def download_model(model_id: str):
         path=model_path,
         filename=filename,
         media_type="application/octet-stream"
+    )
+
+
+# ─── Export Deployment Package Endpoint ────────────────────────────────
+
+@router.get("/models/{model_id}/export")
+async def export_model(model_id: str):
+    """
+    Export a trained model as a complete deployment ZIP package.
+    
+    The package includes:
+    - model_pipeline.pkl   : Combined preprocessing + model pipeline
+    - feature_schema.json  : Input feature specifications
+    - label_encoder.json   : Label encoding/decoding (classification only)
+    - metadata.json        : Training metadata, scores, environment info
+    - requirements.txt     : Minimal Python dependencies
+    - README.md            : Usage documentation
+    - example_inference.py : Standalone prediction script
+    - deployment_guide.pdf : Professional PDF deployment guide
+    """
+    import shutil
+    from app.services.model_export import export_model_package
+
+    automl_store = get_store("automl_models")
+
+    doc = await automl_store.find_one({"_id": model_id})
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model {model_id} not found"
+        )
+
+    model_path = doc.get("model_path")
+    if not model_path or not os.path.exists(model_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Model file not found on disk"
+        )
+
+    try:
+        zip_path = export_model_package(model_doc=doc, model_path=model_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to build export package: {str(e)}"
+        )
+
+    model_name = doc.get("name", "model").replace(" ", "_")
+    zip_filename = f"{model_name}_deployment_package.zip"
+
+    # Stream the ZIP and clean up temp dir after response
+    tmp_dir = os.path.dirname(zip_path)
+
+    def iterfile():
+        try:
+            with open(zip_path, "rb") as f:
+                while chunk := f.read(8192):
+                    yield chunk
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{zip_filename}"',
+        },
     )
 
 
