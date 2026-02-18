@@ -31,6 +31,9 @@ from enum import Enum
 import joblib
 import os
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Optional: VIF calculation for advanced multicollinearity diagnostics
 try:
@@ -38,6 +41,91 @@ try:
     HAS_STATSMODELS = True
 except ImportError:
     HAS_STATSMODELS = False
+
+
+def _cast_to_str(X):
+    """
+    Cast all values in X to str, preserving np.nan as np.nan.
+    Solves sklearn encoder error: 'Got [bool, str]' when columns have mixed types.
+    """
+    df = pd.DataFrame(X)
+    # Replace actual NaN/None with a sentinel, cast to str, then restore NaN
+    result = df.copy()
+    for col in df.columns:
+        nan_mask = df[col].isna()
+        result[col] = df[col].astype(str)
+        result.loc[nan_mask, col] = np.nan
+    return result.values
+
+
+class SelectivePowerTransformer(BaseEstimator, TransformerMixin):
+    """
+    Apply PowerTransformer only to specified column indices, pass-through the rest.
+    This prevents transforming non-skewed columns (e.g., binary features, already-normal features).
+    """
+    def __init__(self, transform_indices=None, method='yeo-johnson'):
+        self.transform_indices = transform_indices or []
+        self.method = method
+
+    def fit(self, X, y=None):
+        if isinstance(X, pd.DataFrame):
+            X = X.values
+        if len(self.transform_indices) > 0:
+            self.transformer_ = PowerTransformer(method=self.method, standardize=False)
+            self.transformer_.fit(X[:, self.transform_indices])
+        else:
+            self.transformer_ = None
+        return self
+
+    def transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            X = X.values
+        X_out = X.copy()
+        if self.transformer_ is not None and len(self.transform_indices) > 0:
+            X_out[:, self.transform_indices] = self.transformer_.transform(X[:, self.transform_indices])
+        return X_out
+
+
+class RareCategoryGrouper(BaseEstimator, TransformerMixin):
+    """
+    Group rare categories into an 'OTHER' category to reduce dimensionality.
+    Categories appearing in < min_frequency fraction of rows are grouped.
+    """
+    def __init__(self, min_frequency=0.01):
+        self.min_frequency = min_frequency
+        self.rare_categories_ = {}  # {col_idx: set(rare_values)}
+
+    def fit(self, X, y=None):
+        if isinstance(X, pd.DataFrame):
+            X_arr = X.values
+        else:
+            X_arr = X
+        n_rows = X_arr.shape[0]
+        self.rare_categories_ = {}
+        for col_idx in range(X_arr.shape[1]):
+            col_data = pd.Series(X_arr[:, col_idx])
+            value_counts = col_data.value_counts(normalize=True, dropna=True)
+            rare = set(value_counts[value_counts < self.min_frequency].index)
+            if rare:
+                self.rare_categories_[col_idx] = rare
+        return self
+
+    def transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            X_out = X.copy()
+            for col_idx, rare_vals in self.rare_categories_.items():
+                col_name = X_out.columns[col_idx]
+                X_out[col_name] = X_out[col_name].apply(
+                    lambda v: '__OTHER__' if v in rare_vals else v
+                )
+            return X_out
+        else:
+            X_out = X.copy()
+            for col_idx, rare_vals in self.rare_categories_.items():
+                for row_idx in range(X_out.shape[0]):
+                    if X_out[row_idx, col_idx] in rare_vals:
+                        X_out[row_idx, col_idx] = '__OTHER__'
+            return X_out
 
 
 class OutlierCapper(BaseEstimator, TransformerMixin):
@@ -74,15 +162,16 @@ class OutlierCapper(BaseEstimator, TransformerMixin):
         
         for i in range(X_array.shape[1]):
             col_data = X_array[:, i]
-            q1 = np.percentile(col_data, 25)
-            q3 = np.percentile(col_data, 75)
+            # Use nan-safe functions to handle NaN values in columns
+            q1 = np.nanpercentile(col_data, 25)
+            q3 = np.nanpercentile(col_data, 75)
             iqr = q3 - q1
             
             # Fallback to standard deviation method if IQR is too small
             # This prevents marking everything as outlier when IQR ≈ 0
             if iqr < 1e-10:  # IQR essentially zero
-                mean = np.mean(col_data)
-                std = np.std(col_data)
+                mean = np.nanmean(col_data)
+                std = np.nanstd(col_data)
                 # Use mean ± 3 standard deviations (99.7% rule)
                 lower_bound = mean - 3 * std
                 upper_bound = mean + 3 * std
@@ -93,8 +182,9 @@ class OutlierCapper(BaseEstimator, TransformerMixin):
             self.lower_bounds_.append(lower_bound)
             self.upper_bounds_.append(upper_bound)
             
-            # Check if any values will be capped
-            if np.any(col_data < lower_bound) or np.any(col_data > upper_bound):
+            # Check if any values will be capped (ignoring NaN)
+            non_nan = col_data[~np.isnan(col_data)] if np.issubdtype(col_data.dtype, np.floating) else col_data
+            if len(non_nan) > 0 and (np.any(non_nan < lower_bound) or np.any(non_nan > upper_bound)):
                 self.capped_columns_.append(columns[i] if i < len(columns) else f"col_{i}")
         
         return self
@@ -116,11 +206,12 @@ class OutlierCapper(BaseEstimator, TransformerMixin):
         print(f"   Bounds: lower={self.lower_bounds_[:3]}, upper={self.upper_bounds_[:3]}")
         
         for i in range(X_array.shape[1]):
-            X_array[:, i] = np.clip(
-                X_array[:, i],
-                self.lower_bounds_[i],
-                self.upper_bounds_[i]
-            )
+            col = X_array[:, i]
+            # Preserve NaN values during clipping
+            nan_mask = np.isnan(col) if np.issubdtype(col.dtype, np.floating) else np.zeros(len(col), dtype=bool)
+            col_clipped = np.clip(col, self.lower_bounds_[i], self.upper_bounds_[i])
+            col_clipped[nan_mask] = np.nan
+            X_array[:, i] = col_clipped
         
         print(f"   Output shape: {X_array.shape}")
         print(f"   Sample output (first row): {X_array[0] if len(X_array) > 0 else 'N/A'}")
@@ -319,7 +410,8 @@ class AdaptivePreprocessor:
             "impact": impact
         }
         self.decision_log.append(log_entry)
-        print(f"[{impact.upper()}] {category}: {decision} - {reason}")
+        log_func = {'info': logger.info, 'warning': logger.warning, 'critical': logger.critical}.get(impact, logger.info)
+        log_func(f"{category}: {decision} - {reason}")
     
     def detect_task_type(self, df: pd.DataFrame, target_column: Optional[str] = None) -> TaskType:
         """
@@ -970,16 +1062,23 @@ class AdaptivePreprocessor:
         if most_common_freq <= self.LOW_VARIANCE_THRESHOLD:
             return False
         
-        # For numerical columns, also check statistical variance
+        # For numerical columns, use coefficient of variation (scale-independent)
         if pd.api.types.is_numeric_dtype(df[col]):
             try:
-                variance = float(df[col].var(ddof=1))
-                # If variance is high (> 100), keep the column even if most values are the same
-                # This preserves columns like "Pool Area" where rare non-zero values matter
-                if variance > 100:
+                col_data = df[col].dropna()
+                mean_val = col_data.mean()
+                std_val = col_data.std(ddof=1)
+                # Coefficient of variation: a scale-independent measure of dispersion
+                # CV > 0.5 means significant variation relative to mean
+                if abs(mean_val) > 1e-10:
+                    cv = abs(std_val / mean_val)
+                    if cv > 0.5:
+                        return False
+                elif std_val > 1e-10:
+                    # Mean is ~0 but std is significant — keep the column
                     return False
             except Exception:
-                pass  # If variance calculation fails, fall through to frequency-based check
+                pass  # If calculation fails, fall through to frequency-based check
         
         return True
     
@@ -1672,8 +1771,13 @@ class AdaptivePreprocessor:
         if len(feature_cols) < 2:
             return []
         
-        # Calculate correlation matrix
-        corr_matrix = df[feature_cols].corr().abs()
+        # Impute NaN with median before computing correlations
+        # (NaN causes pairwise deletion which distorts correlation estimates)
+        df_for_corr = df[feature_cols].copy()
+        for col in feature_cols:
+            if df_for_corr[col].isna().any():
+                df_for_corr[col] = df_for_corr[col].fillna(df_for_corr[col].median())
+        corr_matrix = df_for_corr.corr().abs()
         
         # Find correlated groups using clustering approach
         correlated_groups = self._find_correlated_groups(corr_matrix, threshold)
@@ -2304,26 +2408,36 @@ class AdaptivePreprocessor:
         )
         return "standard"
     
-    def choose_encoding_strategy(self, column: str) -> str:
+    def choose_encoding_strategy(self, column: str, df: Optional[pd.DataFrame] = None) -> str:
         """
         Choose encoding strategy based on model family and cardinality
         
         Args:
             column: Categorical column name
+            df: Optional DataFrame for direct cardinality computation
         
         Returns:
             Encoding strategy name
         """
-        # Get cardinality from EDA or direct count
+        unique_count = None
+        
+        # Get cardinality from EDA results first
         if self.eda_results:
             cat_analysis = self.eda_results.get('categorical_analysis', {})
             cat_features = cat_analysis.get('categorical_features', {})
             if column in cat_features:
                 unique_count = cat_features[column]['unique_count']
-            else:
-                return "onehot"  # Default
-        else:
-            return "onehot"  # Default
+        
+        # Fallback: compute directly from DataFrame
+        if unique_count is None and df is not None and column in df.columns:
+            unique_count = df[column].nunique()
+        
+        # If we still can't determine cardinality, use conservative default
+        if unique_count is None:
+            # For tree-based models, ordinal is always preferred
+            if self.model_family == ModelFamily.TREE_BASED:
+                return "ordinal"
+            return "onehot"
         
         # Decision logic:
         # - Tree-based models: prefer ordinal (faster, handles high cardinality)
@@ -2336,7 +2450,7 @@ class AdaptivePreprocessor:
             self._log_decision(
                 "encoding",
                 f"Using ordinal encoding for '{column}'",
-                f"High cardinality ({unique_count} categories)",
+                f"High cardinality ({unique_count} categories > {self.HIGH_CARDINALITY_THRESHOLD} threshold)",
                 "warning"
             )
             return "ordinal"
@@ -2496,8 +2610,6 @@ class AdaptivePreprocessor:
             # First, check user preferences
             for col in self.numerical_features:
                 preference = self.outlier_preferences.get(col, 'keep')  # Default: keep
-
-                preference = self.outlier_preferences.get(col, 'keep')  # Default: keep
                 
                 if preference == 'cap':
                     columns_to_cap.append(col)
@@ -2566,9 +2678,15 @@ class AdaptivePreprocessor:
             # Apply transformation if needed
             # Linear and distance-based models benefit most from skewness correction
             if skewed_columns and self.model_family in [ModelFamily.LINEAR, ModelFamily.DISTANCE_BASED, ModelFamily.NEURAL_NETWORK]:
-                # Use Yeo-Johnson (most versatile - handles any data)
-                power_transformer = PowerTransformer(method='yeo-johnson', standardize=False)
-                numerical_steps.append(('skewness_transform', power_transformer))
+                # Only transform skewed columns, not all numerical features
+                skewed_indices = [self.numerical_features.index(col) for col in skewed_columns if col in self.numerical_features]
+                
+                if skewed_indices:
+                    selective_transformer = SelectivePowerTransformer(
+                        transform_indices=skewed_indices,
+                        method='yeo-johnson'
+                    )
+                    numerical_steps.append(('skewness_transform', selective_transformer))
                 
                 self.skewed_features_transformed = skewed_columns
                 
@@ -2633,7 +2751,6 @@ class AdaptivePreprocessor:
                 transformers.append(('num', numerical_pipeline, self.numerical_features))
             else:
                 # No transformation needed, but we still need to include the features
-                from sklearn.preprocessing import FunctionTransformer
                 passthrough = FunctionTransformer()
                 numerical_pipeline = Pipeline(steps=[('passthrough', passthrough)])
                 transformers.append(('num', numerical_pipeline, self.numerical_features))
@@ -2685,13 +2802,6 @@ class AdaptivePreprocessor:
             
             # If we still have categorical features after dropping
             if self.categorical_features:
-                # Use most_frequent (mode) for categorical with optional indicator
-                imputer = SimpleImputer(
-                    strategy='most_frequent',
-                    add_indicator=len(cat_columns_with_indicators) > 0
-                )
-                categorical_steps.append(('imputer', imputer))
-                
                 # Track imputation details for columns with missing values
                 for col in self.categorical_features:
                     missing_count = df[col].isnull().sum()
@@ -2711,52 +2821,75 @@ class AdaptivePreprocessor:
                     "info"
                 )
             
-            # Encoding - use same strategy for all (could be per-column in advanced version)
-            sample_col = self.categorical_features[0] if self.categorical_features else None
-            encoding_strategy = self.choose_encoding_strategy(sample_col)
+            # Per-column encoding strategy: group columns by their optimal encoding
+            onehot_cols = []
+            ordinal_cols = []
             
-            if encoding_strategy == "onehot":
-                encoder = OneHotEncoder(
-                    handle_unknown='ignore',
-                    sparse_output=False,
-                    dtype=np.float64
-                )
-                # Track encoding details for each column
-                for col in self.categorical_features:
-                    self.encoding_details.append({
-                        'column': col,
-                        'strategy': 'One-Hot Encoding',
-                        'creates_new_columns': True
-                    })
-                self._log_decision(
-                    "encoding",
-                    "Using OneHotEncoder",
-
-                    "info"
-                )
-            else:  # ordinal
-                encoder = OrdinalEncoder(
-                    handle_unknown='use_encoded_value',
-                    unknown_value=-1,
-                    dtype=np.float64
-                )
-                # Track encoding details for each column
-                for col in self.categorical_features:
+            for col in self.categorical_features:
+                strategy = self.choose_encoding_strategy(col, df=df)
+                if strategy == 'ordinal':
+                    ordinal_cols.append(col)
                     self.encoding_details.append({
                         'column': col,
                         'strategy': 'Ordinal Encoding',
                         'creates_new_columns': False
                     })
+                else:
+                    onehot_cols.append(col)
+                    self.encoding_details.append({
+                        'column': col,
+                        'strategy': 'One-Hot Encoding',
+                        'creates_new_columns': True
+                    })
+            
+            # Create separate pipelines for each encoding group
+            if onehot_cols:
+                ohe_steps = [
+                    # Cast to str first to avoid mixed bool/str/int type errors in encoders
+                    ('to_str', FunctionTransformer(_cast_to_str, validate=False)),
+                    ('imputer', SimpleImputer(
+                        strategy='most_frequent',
+                        add_indicator=False  # Never add indicator columns — they corrupt the string dtype
+                    )),
+                    ('rare_grouper', RareCategoryGrouper(min_frequency=0.01)),
+                    ('encoder', OneHotEncoder(
+                        handle_unknown='ignore',
+                        sparse_output=False,
+                        dtype=np.float64
+                    ))
+                ]
+                transformers.append(('cat_ohe', Pipeline(steps=ohe_steps), onehot_cols))
+                
                 self._log_decision(
                     "encoding",
-                    "Using OrdinalEncoder",
-                    f"Ordinal encoding for {len(self.categorical_features)} categorical columns",
+                    f"OneHotEncoder for {len(onehot_cols)} columns",
+                    f"Columns: {', '.join(onehot_cols[:5])}{'...' if len(onehot_cols) > 5 else ''}. "
+                    f"Rare categories (<1%) grouped into '__OTHER__'",
                     "info"
                 )
             
-            categorical_steps.append(('encoder', encoder))
-            categorical_pipeline = Pipeline(steps=categorical_steps)
-            transformers.append(('cat', categorical_pipeline, self.categorical_features))
+            if ordinal_cols:
+                ord_steps = [
+                    # Cast to str first to avoid mixed bool/str/int type errors in encoders
+                    ('to_str', FunctionTransformer(_cast_to_str, validate=False)),
+                    ('imputer', SimpleImputer(
+                        strategy='most_frequent',
+                        add_indicator=False  # Never add indicator columns — they corrupt the string dtype
+                    )),
+                    ('encoder', OrdinalEncoder(
+                        handle_unknown='use_encoded_value',
+                        unknown_value=-1,
+                        dtype=np.float64
+                    ))
+                ]
+                transformers.append(('cat_ord', Pipeline(steps=ord_steps), ordinal_cols))
+                
+                self._log_decision(
+                    "encoding",
+                    f"OrdinalEncoder for {len(ordinal_cols)} high-cardinality columns",
+                    f"Columns: {', '.join(ordinal_cols[:5])}{'...' if len(ordinal_cols) > 5 else ''}",
+                    "info"
+                )
         
         # Text features (TF-IDF vectorization)
         if self.text_features:
@@ -3302,7 +3435,8 @@ class AdaptivePreprocessor:
                 
                 feature_names.extend(actual_columns)
                 print(f"   ✓ Added {len(actual_columns)} numerical features")
-            elif name == 'cat':
+            elif name.startswith('cat'):
+                # Handle cat_ohe, cat_ord, and legacy 'cat' transformer names
                 encoder = transformer.named_steps['encoder']
                 imputer = transformer.named_steps.get('imputer')
                 
@@ -3461,8 +3595,9 @@ class AdaptivePreprocessor:
         # Imbalance ratio
         imbalance_ratio = class_distribution[majority_class] / class_distribution[minority_class]
         
-        # Detect imbalance (threshold: minority class < 40% or imbalance ratio > 2.5)
-        is_imbalanced = minority_percentage < 40.0 or imbalance_ratio > 2.5
+        # Detect imbalance (threshold: minority class < 25% or imbalance ratio > 3.0)
+        # Industry standard: 20-25% minority threshold avoids over-triggering on balanced datasets
+        is_imbalanced = minority_percentage < 25.0 or imbalance_ratio > 3.0
         
         # Store original distribution
         self.original_class_distribution = {

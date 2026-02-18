@@ -1085,7 +1085,8 @@ async def get_encoding_info(model_id: str):
             # Handle ColumnTransformer
             if isinstance(preprocessor, ColumnTransformer):
                 for name, transformer, columns in preprocessor.transformers_:
-                    if name == 'cat':
+                    # Handle old 'cat' name and new 'cat_ohe' / 'cat_ord' names
+                    if name in ('cat', 'cat_ohe', 'cat_ord'):
                         # Navigate through pipeline steps to find encoder
                         encoder = None
                         if hasattr(transformer, 'named_steps'):
@@ -1112,7 +1113,7 @@ async def get_encoding_info(model_id: str):
                 pipeline = model_data.get('preprocessing_pipeline')
                 if pipeline and isinstance(pipeline, ColumnTransformer):
                     for name, transformer, columns in pipeline.transformers_:
-                        if name == 'cat':
+                        if name in ('cat', 'cat_ohe', 'cat_ord'):
                             encoder = None
                             if hasattr(transformer, 'named_steps'):
                                 encoder = transformer.named_steps.get('encoder')
