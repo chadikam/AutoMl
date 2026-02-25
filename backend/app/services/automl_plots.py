@@ -630,3 +630,304 @@ class AutoMLPlotter:
                 )
         
         return plot_paths
+
+    # ==================== UNSUPERVISED PLOTS ====================
+
+    def plot_unsupervised_model_comparison(
+        self,
+        results: list,
+    ) -> str:
+        """Plot comparison of unsupervised models by primary score."""
+        model_names = [r.model_name for r in results if not r.rejected]
+        scores = [r.primary_score for r in results if not r.rejected]
+
+        if not model_names:
+            model_names = [r.model_name for r in results]
+            scores = [r.primary_score for r in results]
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        colors = ['steelblue' if s > 0 else '#cc3333' for s in scores]
+        bars = ax.bar(range(len(model_names)), scores, color=colors, alpha=0.8, edgecolor='black')
+
+        for bar, score in zip(bars, scores):
+            height = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2., height + 0.01,
+                f'{score:.4f}', ha='center', va='bottom', fontsize=10, fontweight='bold',
+            )
+
+        ax.set_xlabel('Model', fontsize=12)
+        ax.set_ylabel('Score', fontsize=12)
+        ax.set_title('Unsupervised Model Comparison', fontsize=14, fontweight='bold')
+        ax.set_xticks(range(len(model_names)))
+        ax.set_xticklabels(model_names, rotation=45, ha='right')
+        ax.grid(axis='y', alpha=0.3)
+        ax.axhline(y=0, color='black', linewidth=0.5)
+
+        plt.tight_layout()
+        path = self._get_plot_path('unsupervised_model_comparison.png')
+        plt.savefig(path, dpi=self.dpi, bbox_inches='tight')
+        plt.close()
+        return path
+
+    def plot_silhouette_analysis(
+        self,
+        X: np.ndarray,
+        labels: np.ndarray,
+        model_name: str,
+    ) -> str:
+        """Plot per-cluster silhouette analysis."""
+        from sklearn.metrics import silhouette_samples
+        mask = labels != -1
+        if mask.sum() < 2 or len(np.unique(labels[mask])) < 2:
+            return ""
+
+        sil_values = silhouette_samples(X[mask], labels[mask])
+        sil_avg = np.mean(sil_values)
+        unique_labels = np.unique(labels[mask])
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        y_lower = 0
+        colors = plt.cm.rainbow(np.linspace(0, 1, len(unique_labels)))
+
+        for i, (label, color) in enumerate(zip(unique_labels, colors)):
+            cluster_sil = sil_values[labels[mask] == label]
+            cluster_sil.sort()
+
+            y_upper = y_lower + len(cluster_sil)
+            ax.fill_betweenx(
+                np.arange(y_lower, y_upper), 0, cluster_sil,
+                facecolor=color, edgecolor=color, alpha=0.7,
+            )
+            ax.text(-0.05, y_lower + 0.5 * len(cluster_sil), str(int(label)),
+                    fontsize=10, fontweight='bold')
+            y_lower = y_upper + 5
+
+        ax.axvline(x=sil_avg, color='red', linestyle='--', lw=2,
+                   label=f'Average ({sil_avg:.3f})')
+        ax.set_xlabel('Silhouette Coefficient', fontsize=12)
+        ax.set_ylabel('Cluster', fontsize=12)
+        ax.set_title(f'Silhouette Analysis - {model_name}', fontsize=14, fontweight='bold')
+        ax.legend(fontsize=10)
+        ax.grid(axis='x', alpha=0.3)
+
+        plt.tight_layout()
+        path = self._get_plot_path('silhouette_analysis.png')
+        plt.savefig(path, dpi=self.dpi, bbox_inches='tight')
+        plt.close()
+        return path
+
+    def plot_explained_variance(
+        self,
+        explained_variance_ratio: np.ndarray,
+        model_name: str,
+    ) -> str:
+        """Plot explained variance ratio for PCA/SVD."""
+        cumulative = np.cumsum(explained_variance_ratio)
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        x = range(1, len(explained_variance_ratio) + 1)
+        ax.bar(x, explained_variance_ratio, alpha=0.6, color='steelblue',
+               edgecolor='black', label='Individual')
+        ax.step(x, cumulative, where='mid', color='red', lw=2,
+                label='Cumulative')
+        ax.axhline(y=0.95, color='green', linestyle='--', lw=1.5, alpha=0.7,
+                   label='95% threshold')
+
+        ax.set_xlabel('Component', fontsize=12)
+        ax.set_ylabel('Explained Variance Ratio', fontsize=12)
+        ax.set_title(f'Explained Variance - {model_name}', fontsize=14, fontweight='bold')
+        ax.legend(fontsize=10)
+        ax.grid(axis='y', alpha=0.3)
+
+        plt.tight_layout()
+        path = self._get_plot_path('explained_variance.png')
+        plt.savefig(path, dpi=self.dpi, bbox_inches='tight')
+        plt.close()
+        return path
+
+    def plot_anomaly_scatter(
+        self,
+        X: np.ndarray,
+        labels: np.ndarray,
+        scores: np.ndarray,
+        model_name: str,
+    ) -> str:
+        """Plot anomaly detection results on 2D PCA projection."""
+        if X.shape[1] > 2:
+            pca = PCA(n_components=2, random_state=42)
+            X_2d = pca.fit_transform(X)
+            xlabel = f'PC1 ({pca.explained_variance_ratio_[0]:.2%})'
+            ylabel = f'PC2 ({pca.explained_variance_ratio_[1]:.2%})'
+        else:
+            X_2d = X
+            xlabel, ylabel = 'Feature 1', 'Feature 2'
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        inlier_mask = labels == 1
+        outlier_mask = labels == -1
+
+        ax.scatter(X_2d[inlier_mask, 0], X_2d[inlier_mask, 1],
+                   c='steelblue', s=30, alpha=0.5, label=f'Inliers ({inlier_mask.sum()})')
+        ax.scatter(X_2d[outlier_mask, 0], X_2d[outlier_mask, 1],
+                   c='red', s=60, alpha=0.8, marker='x', linewidths=2,
+                   label=f'Outliers ({outlier_mask.sum()})')
+
+        ax.set_xlabel(xlabel, fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=12)
+        ax.set_title(f'Anomaly Detection - {model_name}', fontsize=14, fontweight='bold')
+        ax.legend(fontsize=10)
+        ax.grid(alpha=0.3)
+
+        plt.tight_layout()
+        path = self._get_plot_path('anomaly_scatter.png')
+        plt.savefig(path, dpi=self.dpi, bbox_inches='tight')
+        plt.close()
+        return path
+
+    def plot_anomaly_score_distribution(
+        self,
+        scores: np.ndarray,
+        labels: np.ndarray,
+        model_name: str,
+    ) -> str:
+        """Plot anomaly score distribution."""
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        inlier_scores = scores[labels == 1]
+        outlier_scores = scores[labels == -1]
+
+        if len(inlier_scores) > 0:
+            ax.hist(inlier_scores, bins=30, alpha=0.6, color='steelblue',
+                    edgecolor='black', label='Inliers')
+        if len(outlier_scores) > 0:
+            ax.hist(outlier_scores, bins=30, alpha=0.6, color='red',
+                    edgecolor='black', label='Outliers')
+
+        ax.set_xlabel('Anomaly Score', fontsize=12)
+        ax.set_ylabel('Frequency', fontsize=12)
+        ax.set_title(f'Anomaly Score Distribution - {model_name}',
+                     fontsize=14, fontweight='bold')
+        ax.legend(fontsize=10)
+        ax.grid(axis='y', alpha=0.3)
+
+        plt.tight_layout()
+        path = self._get_plot_path('anomaly_score_distribution.png')
+        plt.savefig(path, dpi=self.dpi, bbox_inches='tight')
+        plt.close()
+        return path
+
+    def generate_unsupervised_plots(
+        self,
+        unsupervised_result,
+        X: np.ndarray,
+        feature_names: list = None,
+    ) -> Dict[str, str]:
+        """
+        Generate all plots for unsupervised learning results.
+
+        Args:
+            unsupervised_result: UnsupervisedResult from UnsupervisedEngine
+            X: Feature matrix
+            feature_names: Feature names
+
+        Returns:
+            Dict mapping plot names to file paths
+        """
+        plot_paths = {}
+        best = unsupervised_result.best_model
+
+        # Model comparison (always)
+        try:
+            plot_paths['model_comparison'] = self.plot_unsupervised_model_comparison(
+                unsupervised_result.all_models,
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to generate model comparison plot: {e}")
+
+        task_subtype = unsupervised_result.task_subtype
+        from .unsupervised_engine import UnsupervisedTaskType
+
+        if task_subtype == UnsupervisedTaskType.CLUSTERING:
+            if best.labels is not None:
+                labels = best.labels
+
+                # 2D PCA cluster scatter
+                try:
+                    plot_paths['clusters_2d'] = self.plot_clusters_2d(
+                        X, labels, best.model_name, feature_names,
+                    )
+                except Exception as e:
+                    print(f"⚠️ Failed to generate cluster 2d plot: {e}")
+
+                # Cluster sizes
+                try:
+                    plot_paths['cluster_sizes'] = self.plot_cluster_sizes(
+                        labels, best.model_name,
+                    )
+                except Exception as e:
+                    print(f"⚠️ Failed to generate cluster sizes plot: {e}")
+
+                # Silhouette analysis
+                try:
+                    path = self.plot_silhouette_analysis(X, labels, best.model_name)
+                    if path:
+                        plot_paths['silhouette_analysis'] = path
+                except Exception as e:
+                    print(f"⚠️ Failed to generate silhouette plot: {e}")
+
+        elif task_subtype == UnsupervisedTaskType.DIMENSIONALITY_REDUCTION:
+            if best.explained_variance_ratio is not None:
+                try:
+                    plot_paths['explained_variance'] = self.plot_explained_variance(
+                        best.explained_variance_ratio, best.model_name,
+                    )
+                except Exception as e:
+                    print(f"⚠️ Failed to generate explained variance plot: {e}")
+
+            # Also make a 2D scatter of transformed data if available
+            if best.transformed_data is not None and best.transformed_data.shape[1] >= 2:
+                try:
+                    fig, ax = plt.subplots(figsize=(12, 8))
+                    ax.scatter(
+                        best.transformed_data[:, 0], best.transformed_data[:, 1],
+                        alpha=0.5, s=30, c='steelblue', edgecolors='black', linewidth=0.3,
+                    )
+                    ax.set_xlabel('Component 1', fontsize=12)
+                    ax.set_ylabel('Component 2', fontsize=12)
+                    ax.set_title(f'2D Projection - {best.model_name}', fontsize=14, fontweight='bold')
+                    ax.grid(alpha=0.3)
+                    plt.tight_layout()
+                    path = self._get_plot_path('dimred_2d_scatter.png')
+                    plt.savefig(path, dpi=self.dpi, bbox_inches='tight')
+                    plt.close()
+                    plot_paths['dimred_2d_scatter'] = path
+                except Exception as e:
+                    print(f"⚠️ Failed to generate dimred scatter: {e}")
+
+        elif task_subtype == UnsupervisedTaskType.ANOMALY_DETECTION:
+            if best.anomaly_labels is not None:
+                labels = best.anomaly_labels
+                scores = best.anomaly_scores if best.anomaly_scores is not None else np.zeros(len(labels))
+
+                # Anomaly scatter
+                try:
+                    plot_paths['anomaly_scatter'] = self.plot_anomaly_scatter(
+                        X, labels, scores, best.model_name,
+                    )
+                except Exception as e:
+                    print(f"⚠️ Failed to generate anomaly scatter: {e}")
+
+                # Score distribution
+                try:
+                    plot_paths['anomaly_score_distribution'] = self.plot_anomaly_score_distribution(
+                        scores, labels, best.model_name,
+                    )
+                except Exception as e:
+                    print(f"⚠️ Failed to generate anomaly score dist: {e}")
+
+        return plot_paths

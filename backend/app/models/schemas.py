@@ -192,6 +192,14 @@ class AutoMLTaskType(str, Enum):
     CLASSIFICATION = "classification"
     REGRESSION = "regression"
     CLUSTERING = "clustering"
+    UNSUPERVISED = "unsupervised"
+
+
+class UnsupervisedSubtype(str, Enum):
+    """Unsupervised learning sub-task types"""
+    CLUSTERING = "clustering"
+    DIMENSIONALITY_REDUCTION = "dimensionality_reduction"
+    ANOMALY_DETECTION = "anomaly_detection"
 
 
 class AutoMLConfig(BaseModel):
@@ -209,8 +217,9 @@ class AutoMLConfig(BaseModel):
 class AutoMLTrainRequest(BaseModel):
     """AutoML training request"""
     dataset_id: str
-    target_column: str
+    target_column: Optional[str] = None  # None for unsupervised tasks
     task_type: AutoMLTaskType
+    unsupervised_subtype: Optional[UnsupervisedSubtype] = None  # Sub-task for unsupervised
     name: str
     description: Optional[str] = None
     config: AutoMLConfig = Field(default_factory=AutoMLConfig)
@@ -218,7 +227,7 @@ class AutoMLTrainRequest(BaseModel):
 
 
 class ModelResultSchema(BaseModel):
-    """Individual model result"""
+    """Individual model result (supervised)"""
     model_config = {"protected_namespaces": ()}
     
     model_name: str
@@ -240,6 +249,23 @@ class ModelResultSchema(BaseModel):
     optimization_time: float
 
 
+class UnsupervisedModelResultSchema(BaseModel):
+    """Individual model result (unsupervised)"""
+    model_config = {"protected_namespaces": ()}
+
+    model_name: str
+    model_type: str
+    task_subtype: str
+    primary_score: float
+    detailed_metrics: Dict[str, Any]
+    best_params: Dict[str, Any]
+    n_trials: int = 0
+    optimization_time: float = 0.0
+    stability_status: str = "stable"
+    rejected: bool = False
+    rejection_reason: Optional[str] = None
+
+
 class AutoMLResponse(BaseModel):
     """AutoML training response"""
     model_config = {"protected_namespaces": ()}
@@ -254,14 +280,16 @@ class AutoMLResponse(BaseModel):
     # Best model info
     best_model_name: str
     best_model_type: str
-    best_generalization_score: float
-    best_cv_score: float
-    best_test_score: float
-    best_overfit_gap: float
-    best_params: Dict[str, Any]
+    best_generalization_score: Optional[float] = None
+    best_primary_score: Optional[float] = None  # For unsupervised
+    best_cv_score: Optional[float] = None
+    best_test_score: Optional[float] = None
+    best_overfit_gap: Optional[float] = None
+    best_params: Dict[str, Any] = {}
+    best_detailed_metrics: Optional[Dict[str, Any]] = None
     
-    # All models
-    all_models: List[ModelResultSchema]
+    # All models (supports both supervised ModelResultSchema and unsupervised dicts)
+    all_models: List[Any] = []
     total_models_evaluated: int
     models_rejected: int
     
@@ -270,7 +298,8 @@ class AutoMLResponse(BaseModel):
     
     # Metadata
     feature_names: List[str]
-    target_column: str
+    target_column: Optional[str] = None  # None for unsupervised
+    unsupervised_subtype: Optional[str] = None
     preprocessing_metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
     training_duration: float
@@ -281,3 +310,8 @@ class AutoMLResponse(BaseModel):
     
     # Configuration
     config: Optional[Dict[str, Any]] = None
+    
+    # Unsupervised-specific outputs
+    cluster_labels: Optional[List[int]] = None
+    anomaly_labels: Optional[List[int]] = None
+    explained_variance: Optional[Dict[str, Any]] = None

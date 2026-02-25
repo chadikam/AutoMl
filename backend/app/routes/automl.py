@@ -25,10 +25,15 @@ from app.models.schemas import (
     AutoMLTrainRequest,
     AutoMLResponse,
     ModelResultSchema,
-    AutoMLTaskType
+    UnsupervisedModelResultSchema,
+    AutoMLTaskType,
+    UnsupervisedSubtype,
 )
 from app.storage import get_store, generate_id
 from app.services.automl_engine import AutoMLEngine, TaskType, ModelResult
+from app.services.unsupervised_engine import (
+    UnsupervisedEngine, UnsupervisedTaskType, UnsupervisedModelResult, UnsupervisedResult,
+)
 from app.services.automl_plots import AutoMLPlotter
 from app.services.adaptive_preprocessing import AdaptivePreprocessor
 from app.services.training_manager import TrainingManager, TrainingPhase
@@ -45,17 +50,26 @@ router = APIRouter(prefix="/api/automl", tags=["AutoML"])
 
 
 def convert_numpy_types(obj):
-    """Recursively convert numpy types to Python native types for JSON serialization"""
+    """Recursively convert numpy types to Python native types for JSON serialization.
+    Also sanitizes float nan/inf values which are not JSON-compliant."""
     import numpy as np
-    
+    import math
+
     if isinstance(obj, np.bool_):
         return bool(obj)
     elif isinstance(obj, np.integer):
         return int(obj)
     elif isinstance(obj, np.floating):
-        return float(obj)
+        v = float(obj)
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return v
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
     elif isinstance(obj, np.ndarray):
-        return obj.tolist()
+        return convert_numpy_types(obj.tolist())
     elif isinstance(obj, dict):
         return {key: convert_numpy_types(value) for key, value in obj.items()}
     elif isinstance(obj, (list, tuple)):
@@ -112,9 +126,27 @@ async def start_training(
     
     # Determine which models will be trained
     task_type_str = request.task_type.value if request.task_type else "classification"
+    is_unsupervised = task_type_str in ("unsupervised", "clustering")
     models_to_train = request.config.models_to_train
+
     if not models_to_train:
-        if task_type_str == "classification":
+        if is_unsupervised:
+            # Determine unsupervised sub-task model list
+            subtype = request.unsupervised_subtype
+            if subtype and subtype.value == "dimensionality_reduction":
+                models_to_train = list(UnsupervisedEngine.DIMENSIONALITY_REDUCTION_MODELS.keys())
+            elif subtype and subtype.value == "anomaly_detection":
+                models_to_train = list(UnsupervisedEngine.ANOMALY_DETECTION_MODELS.keys())
+            else:
+                # Default: clustering
+                models_to_train = list(UnsupervisedEngine.CLUSTERING_MODELS.keys())
+                # Add optional models
+                try:
+                    from hdbscan import HDBSCAN
+                    models_to_train.append('hdbscan')
+                except ImportError:
+                    pass
+        elif task_type_str == "classification":
             models_to_train = list(AutoMLEngine.CLASSIFICATION_MODELS.keys())
         elif task_type_str == "regression":
             models_to_train = list(AutoMLEngine.REGRESSION_MODELS.keys())
@@ -310,15 +342,49 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
             # Raw dataset
             training_manager.add_log("Loading raw dataset")
             df = pd.read_csv(dataset["file_path"], sep=None, engine='python', skipinitialspace=True)
-            if request.target_column not in df.columns:
-                training_manager.add_log(f"Target column '{request.target_column}' not found")
-                training_manager.finish_session(TrainingPhase.FAILED)
-                return
-            target_column = request.target_column
+
+            is_unsupervised = request.task_type in (AutoMLTaskType.UNSUPERVISED, AutoMLTaskType.CLUSTERING) and not request.target_column
+            target_column = request.target_column if request.target_column else None
+
+            if not is_unsupervised:
+                if not target_column or target_column not in df.columns:
+                    training_manager.add_log(f"Target column '{target_column}' not found")
+                    training_manager.finish_session(TrainingPhase.FAILED)
+                    return
             X_test, y_test = None, None
 
             # Preprocessing
-            if request.preprocessing_config and request.preprocessing_config.use_adaptive:
+            if is_unsupervised:
+                # ─── Geometry-aware unsupervised preprocessing ───
+                # Uses UnsupervisedPreprocessor which:
+                #   1. Removes ID/constant columns
+                #   2. Handles skewness with PowerTransformer
+                #   3. Scales numeric with RobustScaler (not StandardScaler)
+                #   4. OHE categorical WITHOUT scaling (preserves binary geometry)
+                #   5. VarianceThreshold to remove near-zero-variance features
+                #   6. Auto-PCA when dimensionality is too high
+                training_manager.add_log("Unsupervised preprocessing (geometry-aware pipeline)")
+                from ..services.unsupervised_preprocessing import UnsupervisedPreprocessor
+
+                unsup_preprocessor = UnsupervisedPreprocessor(
+                    max_onehot_cardinality=15,
+                    variance_threshold=0.01,
+                    pca_variance_threshold=0.95,
+                    auto_pca=True,
+                    auto_pca_trigger_features=50,
+                    handle_skewness=True,
+                    skewness_threshold=1.0,
+                    id_column_heuristics=True,
+                    log_callback=lambda msg: training_manager.add_log(f"[Preprocess] {msg}"),
+                )
+
+                X_transformed, feature_names, preprocessing_metadata = unsup_preprocessor.fit_transform(df)
+                preprocessing_pipeline = unsup_preprocessor.get_pipeline_components()
+
+                y = None
+                preprocessing_method = "unsupervised_geometry_aware"
+
+            elif request.preprocessing_config and request.preprocessing_config.use_adaptive:
                 preprocessor = AdaptivePreprocessor(
                     eda_results=dataset.get("eda_results"),
                     outlier_preferences={}
@@ -383,6 +449,22 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
         # ===== STEP 2: AUTOML TRAINING =====
         training_manager.set_phase(TrainingPhase.TRAINING)
 
+        is_unsupervised_task = (
+            request.task_type == AutoMLTaskType.UNSUPERVISED or
+            (request.task_type == AutoMLTaskType.CLUSTERING and y is None) or
+            (y is None and not request.target_column)
+        )
+
+        if is_unsupervised_task:
+            # ──── UNSUPERVISED TRAINING PATH ────
+            await _run_unsupervised_training(
+                training_manager, request, X_transformed, feature_names,
+                preprocessing_pipeline, preprocessing_metadata, preprocessing_method,
+                start_time, is_preprocessed, datasets_store, automl_store,
+            )
+            return
+
+        # ──── SUPERVISED TRAINING PATH (existing) ────
         if request.task_type == AutoMLTaskType.CLASSIFICATION:
             task_type = TaskType.CLASSIFICATION
         elif request.task_type == AutoMLTaskType.REGRESSION:
@@ -576,6 +658,214 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
         training_manager.finish_session(TrainingPhase.FAILED)
 
 
+# ─── Unsupervised Training Path ──────────────────────────────────────
+
+async def _run_unsupervised_training(
+    training_manager,
+    request: AutoMLTrainRequest,
+    X_transformed: np.ndarray,
+    feature_names: List,
+    preprocessing_pipeline,
+    preprocessing_metadata: dict,
+    preprocessing_method: str,
+    start_time: datetime,
+    is_preprocessed: bool,
+    datasets_store,
+    automl_store,
+):
+    """
+    Unsupervised training path - handles clustering, dimensionality reduction, and anomaly detection.
+    Called from _run_training_async when task is unsupervised with no target column.
+    """
+    import joblib
+
+    # Determine sub-task type
+    subtype_val = request.unsupervised_subtype.value if request.unsupervised_subtype else "clustering"
+    if subtype_val == "dimensionality_reduction":
+        task_subtype = UnsupervisedTaskType.DIMENSIONALITY_REDUCTION
+    elif subtype_val == "anomaly_detection":
+        task_subtype = UnsupervisedTaskType.ANOMALY_DETECTION
+    else:
+        task_subtype = UnsupervisedTaskType.CLUSTERING
+
+    training_manager.add_log(f"Unsupervised mode: {task_subtype.value}")
+
+    engine = UnsupervisedEngine(
+        task_subtype=task_subtype,
+        n_trials=request.config.n_trials,
+        random_state=42,
+        max_cpu_cores=getattr(request.config, 'max_cpu_cores', 4),
+        verbose=True,
+    )
+
+    # Callbacks
+    def on_model_start(model_name):
+        training_manager.set_current_model(model_name)
+        training_manager.clear_skip()
+
+    def on_model_complete(model_name, score, model_status):
+        training_manager.complete_model(model_name, score=score, status=model_status)
+
+    def trial_progress_cb(trial_num, total_trials, best_score):
+        training_manager.update_trial(trial_num, total_trials, best_score)
+
+    unsupervised_result = engine.fit(
+        X=X_transformed,
+        feature_names=feature_names,
+        model_subset=request.config.models_to_train,
+        cancellation_callback=training_manager.cancellation_callback,
+        force_cancel_flag=training_manager.force_cancel_flag,
+        skip_callback=training_manager.is_skip_requested,
+        on_model_start=on_model_start,
+        on_model_complete=on_model_complete,
+        trial_progress_callback=trial_progress_cb,
+    )
+
+    training_duration = (datetime.now() - start_time).total_seconds()
+
+    # Check if all cancelled
+    if all(r.stability_status == "cancelled" for r in unsupervised_result.all_models):
+        training_manager.add_log("All models cancelled")
+        training_manager.finish_session(TrainingPhase.CANCELLED)
+        return
+
+    # ===== PLOTS =====
+    training_manager.set_phase(TrainingPhase.PLOTTING)
+    training_manager.add_log("Generating unsupervised evaluation plots...")
+
+    plots_dir = os.path.join(settings.models_dir, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
+    plotter = AutoMLPlotter(output_dir=plots_dir)
+
+    raw_plot_paths = plotter.generate_unsupervised_plots(
+        unsupervised_result=unsupervised_result,
+        X=X_transformed,
+        feature_names=feature_names,
+    )
+
+    plot_paths = {
+        name: os.path.basename(path)
+        for name, path in raw_plot_paths.items()
+    }
+
+    # ===== SAVE MODEL =====
+    training_manager.set_phase(TrainingPhase.SAVING)
+    training_manager.add_log("Saving unsupervised model to disk...")
+
+    model_id = generate_id()
+    model_filename = f"{model_id}_automl_model.joblib"
+    model_path = os.path.join(settings.models_dir, model_filename)
+    os.makedirs(settings.models_dir, exist_ok=True)
+
+    engine.save(model_path, preprocessing_pipeline=preprocessing_pipeline)
+
+    preprocessing_path = None
+    if preprocessing_pipeline:
+        preprocessing_filename = f"{model_id}_preprocessing.joblib"
+        preprocessing_path = os.path.join(settings.models_dir, preprocessing_filename)
+        joblib.dump(preprocessing_pipeline, preprocessing_path)
+
+    # ===== EXPORT ARTIFACTS =====
+    best = unsupervised_result.best_model
+
+    # Save cluster labels CSV
+    cluster_labels_list = None
+    anomaly_labels_list = None
+    explained_variance_data = None
+
+    if best.labels is not None:
+        cluster_labels_list = best.labels.tolist()
+        labels_path = os.path.join(settings.models_dir, f"{model_id}_cluster_labels.csv")
+        pd.DataFrame({'cluster_label': best.labels}).to_csv(labels_path, index=False)
+        training_manager.add_log(f"Saved cluster labels to {os.path.basename(labels_path)}")
+
+    if best.anomaly_labels is not None:
+        anomaly_labels_list = best.anomaly_labels.tolist()
+        anomaly_path = os.path.join(settings.models_dir, f"{model_id}_anomaly_labels.csv")
+        pd.DataFrame({
+            'anomaly_label': best.anomaly_labels,
+            'anomaly_score': best.anomaly_scores if best.anomaly_scores is not None else 0,
+        }).to_csv(anomaly_path, index=False)
+
+    if best.explained_variance_ratio is not None:
+        explained_variance_data = {
+            'explained_variance_ratio': best.explained_variance_ratio.tolist(),
+            'cumulative': np.cumsum(best.explained_variance_ratio).tolist(),
+            'total_explained': float(np.sum(best.explained_variance_ratio)),
+        }
+
+    # Save evaluation metrics JSON
+    metrics_path = os.path.join(settings.models_dir, f"{model_id}_evaluation_metrics.json")
+    import json
+    with open(metrics_path, 'w') as f:
+        json.dump(convert_numpy_types(best.detailed_metrics), f, indent=2)
+
+    # ===== SAVE TO DATABASE =====
+    automl_doc = {
+        "_id": model_id,
+        "dataset_id": request.dataset_id,
+        "name": request.name,
+        "description": request.description,
+        "task_type": "unsupervised",
+        "unsupervised_subtype": task_subtype.value,
+        "best_model_name": best.model_name,
+        "best_model_type": best.model_type,
+        "best_generalization_score": float(best.primary_score),
+        "best_primary_score": float(best.primary_score),
+        "best_cv_score": float(best.primary_score),  # No CV for unsupervised
+        "best_test_score": float(best.primary_score),
+        "best_overfit_gap": 0.0,
+        "best_params": convert_numpy_types(best.best_params),
+        "best_detailed_metrics": convert_numpy_types(best.detailed_metrics),
+        "best_feature_importance": None,
+        "all_models": [
+            convert_numpy_types({
+                "model_name": r.model_name,
+                "model_type": r.model_type,
+                "task_subtype": r.task_subtype.value if hasattr(r.task_subtype, 'value') else str(r.task_subtype),
+                "primary_score": r.primary_score,
+                "detailed_metrics": r.detailed_metrics,
+                "best_params": r.best_params,
+                "n_trials": r.n_trials,
+                "optimization_time": r.optimization_time,
+                "stability_status": r.stability_status,
+                "rejected": r.rejected,
+                "rejection_reason": r.rejection_reason,
+            }) for r in unsupervised_result.all_models
+        ],
+        "total_models_evaluated": unsupervised_result.total_models_evaluated,
+        "models_rejected": unsupervised_result.models_rejected,
+        "plot_paths": plot_paths,
+        "feature_names": feature_names,
+        "target_column": None,
+        "label_mapping": None,
+        "preprocessing_metadata": preprocessing_metadata,
+        "created_at": datetime.utcnow(),
+        "training_duration": training_duration,
+        "model_path": model_path,
+        "preprocessing_path": preprocessing_path,
+        "config": request.config.dict(),
+        "preprocessing_config": request.preprocessing_config.dict() if request.preprocessing_config else None,
+        "cluster_labels": cluster_labels_list,
+        "anomaly_labels": anomaly_labels_list,
+        "explained_variance": explained_variance_data,
+        "n_samples": unsupervised_result.n_samples,
+        "n_features": unsupervised_result.n_features,
+    }
+
+    await automl_store.insert_one(automl_doc)
+
+    training_manager.add_log(f"Training complete! Model ID: {model_id}")
+    training_manager.add_log(f"Best model: {best.model_name} (score: {best.primary_score:.4f})")
+
+    with training_manager._state_lock:
+        training_manager._result_model_id = model_id
+        training_manager._training_duration = training_duration
+
+    training_manager.finish_session(TrainingPhase.COMPLETED)
+    print(f"✅ Unsupervised training completed! Model ID: {model_id}")
+
+
 # ─── New Training Orchestration Endpoints ──────────────────────────────
 
 @router.get("/training-status")
@@ -721,9 +1011,11 @@ async def list_models():
             "all_models": doc.get("all_models", []),
             "dataset_name": dataset_name,
             "dataset_id": doc.get("dataset_id"),
+            "unsupervised_subtype": doc.get("unsupervised_subtype"),
+            "best_primary_score": doc.get("best_primary_score"),
         })
     
-    return result
+    return convert_numpy_types(result)
 
 
 @router.get("/models/{model_id}")
@@ -748,7 +1040,7 @@ async def get_model(model_id: str):
     except Exception:
         pass
     
-    return {
+    response = {
         "id": doc["_id"],
         "name": doc.get("name", "Unnamed"),
         "description": doc.get("description"),
@@ -779,7 +1071,16 @@ async def get_model(model_id: str):
         "config": doc.get("config"),
         "preprocessing_config": doc.get("preprocessing_config"),
         "status": "completed",
+        # Unsupervised-specific fields
+        "unsupervised_subtype": doc.get("unsupervised_subtype"),
+        "cluster_labels": doc.get("cluster_labels"),
+        "anomaly_labels": doc.get("anomaly_labels"),
+        "explained_variance": doc.get("explained_variance"),
+        "n_samples": doc.get("n_samples"),
+        "n_features": doc.get("n_features"),
+        "best_primary_score": doc.get("best_primary_score"),
     }
+    return convert_numpy_types(response)
 
 
 @router.delete("/models/{model_id}")

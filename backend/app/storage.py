@@ -20,8 +20,25 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 
 def _json_serializer(obj):
     """Custom JSON serializer for datetime and other types"""
+    import math
+    import numpy as np
     if isinstance(obj, datetime):
         return obj.isoformat()
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    try:
+        import numpy as np
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            v = float(obj)
+            return None if (math.isnan(v) or math.isinf(v)) else v
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+    except ImportError:
+        pass
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 

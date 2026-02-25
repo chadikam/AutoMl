@@ -88,7 +88,17 @@ export default function TrainAutoMLModel() {
     classification: [],
     regression: [],
     clustering: [],
+    unsupervised_clustering: [],
+    unsupervised_dimensionality_reduction: [],
+    unsupervised_anomaly_detection: [],
   });
+  const [unsupervisedSubtype, setUnsupervisedSubtype] = useState('clustering');
+
+  const unsupervisedSubtypes = [
+    { id: 'clustering', name: 'Clustering', description: 'Group similar data points into clusters' },
+    { id: 'dimensionality_reduction', name: 'Dimensionality Reduction', description: 'Reduce feature dimensions while preserving structure' },
+    { id: 'anomaly_detection', name: 'Anomaly Detection', description: 'Identify outliers and unusual data points' },
+  ];
 
   const availableModels = {
     classification: [
@@ -119,6 +129,22 @@ export default function TrainAutoMLModel() {
       { id: 'kmeans', name: 'K-Means', description: 'Centroid-based' },
       { id: 'dbscan', name: 'DBSCAN', description: 'Density-based' },
       { id: 'agglomerative', name: 'Agglomerative', description: 'Hierarchical' },
+    ],
+    unsupervised_clustering: [
+      { id: 'kmeans', name: 'K-Means', description: 'Centroid-based clustering' },
+      { id: 'mini_batch_kmeans', name: 'MiniBatch K-Means', description: 'Scalable K-Means' },
+      { id: 'dbscan', name: 'DBSCAN', description: 'Density-based spatial clustering' },
+      { id: 'agglomerative', name: 'Agglomerative', description: 'Hierarchical clustering' },
+      { id: 'hdbscan', name: 'HDBSCAN', description: 'Hierarchical density-based (optional)' },
+    ],
+    unsupervised_dimensionality_reduction: [
+      { id: 'pca', name: 'PCA', description: 'Principal Component Analysis' },
+      { id: 'truncated_svd', name: 'Truncated SVD', description: 'Sparse-friendly SVD' },
+      { id: 'umap', name: 'UMAP', description: 'Manifold learning (optional)' },
+    ],
+    unsupervised_anomaly_detection: [
+      { id: 'isolation_forest', name: 'Isolation Forest', description: 'Tree-based anomaly detection' },
+      { id: 'local_outlier_factor', name: 'Local Outlier Factor', description: 'Density-based outlier detection' },
     ],
   };
 
@@ -242,16 +268,20 @@ export default function TrainAutoMLModel() {
       // Get task type from preprocessing summary
       const taskType = selectedDataset?.preprocessing_summary?.task_type || 'classification';
       const targetColumn = selectedDataset?.preprocessing_summary?.target_column || '';
+      const isUnsupervised = taskType === 'unsupervised';
+
+      // Determine model key for unsupervised subtypes
+      const modelKey = isUnsupervised ? `unsupervised_${unsupervisedSubtype}` : taskType;
 
       // Determine which models will be trained
-      const modelsToTrain = selectedModels[taskType]?.length > 0
-        ? selectedModels[taskType]
-        : availableModels[taskType].map(m => m.id);
+      const modelsToTrain = selectedModels[modelKey]?.length > 0
+        ? selectedModels[modelKey]
+        : availableModels[modelKey]?.map(m => m.id) || [];
 
       // Initialize logs for display
       const initialLogs = modelsToTrain.map((modelId) => ({
         id: modelId,
-        name: availableModels[taskType].find(m => m.id === modelId)?.name || modelId,
+        name: availableModels[modelKey]?.find(m => m.id === modelId)?.name || modelId,
       }));
       setTrainingLogs(initialLogs);
 
@@ -260,13 +290,14 @@ export default function TrainAutoMLModel() {
         name: formData.name,
         description: formData.description,
         dataset_id: formData.dataset_id,
-        target_column: targetColumn,
+        target_column: isUnsupervised ? null : targetColumn,
         task_type: taskType,
+        ...(isUnsupervised && { unsupervised_subtype: unsupervisedSubtype }),
         config: {
           ...formData.config,
           models_to_train:
-            selectedModels[taskType]?.length > 0
-              ? selectedModels[taskType]
+            selectedModels[modelKey]?.length > 0
+              ? selectedModels[modelKey]
               : null,
         },
         preprocessing_config: {
@@ -377,6 +408,8 @@ export default function TrainAutoMLModel() {
 
   const canProceedStep1 = formData.name && formData.dataset_id;
   const taskType = selectedDataset?.preprocessing_summary?.task_type || 'classification';
+  const isUnsupervised = taskType === 'unsupervised';
+  const modelKey = isUnsupervised ? `unsupervised_${unsupervisedSubtype}` : taskType;
 
   const steps = [
     { number: 1, title: 'Dataset & Info', icon: Database },
@@ -590,28 +623,60 @@ export default function TrainAutoMLModel() {
             <Info className="h-4 w-4" />
             <AlertTitle>Task Type: {taskType.charAt(0).toUpperCase() + taskType.slice(1)}</AlertTitle>
             <AlertDescription>
-              Based on your preprocessed dataset. Select specific models to train or leave empty to train all available models.
+              {isUnsupervised
+                ? 'Unsupervised learning — no target column needed. Select a subtype and models below.'
+                : 'Based on your preprocessed dataset. Select specific models to train or leave empty to train all available models.'}
             </AlertDescription>
           </Alert>
+
+          {/* Unsupervised Subtype Selector */}
+          {isUnsupervised && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Unsupervised Learning Type</CardTitle>
+                <CardDescription>
+                  Choose what kind of unsupervised analysis to perform
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {unsupervisedSubtypes.map((subtype) => (
+                    <div
+                      key={subtype.id}
+                      className={`border-2 rounded-lg p-4 cursor-pointer transition-colors ${
+                        unsupervisedSubtype === subtype.id
+                          ? 'border-primary bg-primary/5'
+                          : 'border-muted hover:border-muted-foreground/30'
+                      }`}
+                      onClick={() => setUnsupervisedSubtype(subtype.id)}
+                    >
+                      <div className="font-medium">{subtype.name}</div>
+                      <div className="text-sm text-muted-foreground mt-1">{subtype.description}</div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>
               <CardTitle>Select Models (Optional)</CardTitle>
               <CardDescription>
-                Choose specific models or leave empty to train all {availableModels[taskType]?.length || 0} models
+                Choose specific models or leave empty to train all {availableModels[modelKey]?.length || 0} models
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {availableModels[taskType]?.map((model) => (
+                {availableModels[modelKey]?.map((model) => (
                   <div
                     key={model.id}
                     className="flex items-start space-x-3 border rounded-lg p-3 hover:bg-accent/50 cursor-pointer"
-                    onClick={() => handleModelToggle(model.id, taskType)}
+                    onClick={() => handleModelToggle(model.id, modelKey)}
                   >
                     <Checkbox
-                      checked={selectedModels[taskType]?.includes(model.id) || false}
-                      onCheckedChange={() => handleModelToggle(model.id, taskType)}
+                      checked={selectedModels[modelKey]?.includes(model.id) || false}
+                      onCheckedChange={() => handleModelToggle(model.id, modelKey)}
                     />
                     <div className="flex-1">
                       <div className="font-medium text-sm">{model.name}</div>
@@ -630,9 +695,11 @@ export default function TrainAutoMLModel() {
         <div className="space-y-6">
           <Alert>
             <TrendingUp className="h-4 w-4" />
-            <AlertTitle>Generalization-Focused Training</AlertTitle>
+            <AlertTitle>{isUnsupervised ? 'Unsupervised Optimization' : 'Generalization-Focused Training'}</AlertTitle>
             <AlertDescription>
-              Models are selected based on generalization score, not raw performance. This ensures models that truly generalize well are chosen.
+              {isUnsupervised
+                ? 'Optuna will optimize hyperparameters using unsupervised metrics (silhouette score, explained variance, etc.).'
+                : 'Models are selected based on generalization score, not raw performance. This ensures models that truly generalize well are chosen.'}
             </AlertDescription>
           </Alert>
 
@@ -684,6 +751,7 @@ export default function TrainAutoMLModel() {
             </CardContent>
           </Card>
 
+          {!isUnsupervised && (
           <Card>
             <CardHeader>
               <CardTitle>Overfitting Control</CardTitle>
@@ -752,9 +820,18 @@ export default function TrainAutoMLModel() {
                   Higher penalty factor applied above this threshold
                 </div>
               </div>
+            </CardContent>
+          </Card>
+          )}
 
-              <Separator />
-
+          <Card>
+            <CardHeader>
+              <CardTitle>Performance Settings</CardTitle>
+              <CardDescription>
+                Resource allocation for training
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>
@@ -808,8 +885,13 @@ export default function TrainAutoMLModel() {
                 <div>
                   <div className="text-sm text-muted-foreground mb-1">Task Type</div>
                   <Badge>{taskType}</Badge>
+                  {isUnsupervised && (
+                    <Badge variant="outline" className="ml-2">
+                      {unsupervisedSubtype.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </Badge>
+                  )}
                 </div>
-                {selectedDataset?.preprocessing_summary?.target_column && (
+                {!isUnsupervised && selectedDataset?.preprocessing_summary?.target_column && (
                   <div>
                     <div className="text-sm text-muted-foreground mb-1">Target Column</div>
                     <div className="font-mono text-sm">{selectedDataset.preprocessing_summary.target_column}</div>
@@ -822,13 +904,13 @@ export default function TrainAutoMLModel() {
               <div>
                 <div className="text-sm text-muted-foreground mb-2">Models to Train</div>
                 <div className="flex flex-wrap gap-2">
-                  {selectedModels[taskType]?.length > 0 ? (
-                    selectedModels[taskType].map((modelId) => {
-                      const model = availableModels[taskType]?.find((m) => m.id === modelId);
+                  {selectedModels[modelKey]?.length > 0 ? (
+                    selectedModels[modelKey].map((modelId) => {
+                      const model = availableModels[modelKey]?.find((m) => m.id === modelId);
                       return <Badge key={modelId} variant="outline">{model?.name}</Badge>;
                     })
                   ) : (
-                    <Badge variant="outline">All {availableModels[taskType]?.length || 0} models</Badge>
+                    <Badge variant="outline">All {availableModels[modelKey]?.length || 0} models</Badge>
                   )}
                 </div>
               </div>
@@ -844,18 +926,22 @@ export default function TrainAutoMLModel() {
                   <div className="text-muted-foreground mb-1">CV Folds</div>
                   <div className="font-semibold">{formData.config.cv_folds}</div>
                 </div>
-                <div>
-                  <div className="text-muted-foreground mb-1">Penalty Factor</div>
-                  <div className="font-semibold">{formData.config.penalty_factor.toFixed(1)}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground mb-1">Rejection Threshold</div>
-                  <div className="font-semibold">{formData.config.overfit_threshold_reject.toFixed(2)}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground mb-1">High Penalty Threshold</div>
-                  <div className="font-semibold">{formData.config.overfit_threshold_high.toFixed(2)}</div>
-                </div>
+                {!isUnsupervised && (
+                  <>
+                    <div>
+                      <div className="text-muted-foreground mb-1">Penalty Factor</div>
+                      <div className="font-semibold">{formData.config.penalty_factor.toFixed(1)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground mb-1">Rejection Threshold</div>
+                      <div className="font-semibold">{formData.config.overfit_threshold_reject.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground mb-1">High Penalty Threshold</div>
+                      <div className="font-semibold">{formData.config.overfit_threshold_high.toFixed(2)}</div>
+                    </div>
+                  </>
+                )}
                 <div>
                   <div className="text-muted-foreground mb-1">Max CPU Cores</div>
                   <div className="font-semibold">{formData.config.max_cpu_cores}</div>
@@ -1025,7 +1111,7 @@ export default function TrainAutoMLModel() {
                       elapsed_seconds: 0,
                       best_score: null,
                     }))).map((model) => {
-                      const displayName = (availableModels[taskType]?.find(m => m.id === model.model_name)?.name)
+                      const displayName = (availableModels[modelKey]?.find(m => m.id === model.model_name)?.name)
                         || model.model_name?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
                         || 'Unknown';
 

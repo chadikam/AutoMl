@@ -165,7 +165,14 @@ export default function AutoMLModelDetail() {
   }
 
   // API returns flat structure, not nested
-  const bestModel = {
+  const isUnsupervised = model.task_type === 'unsupervised';
+  const bestModel = isUnsupervised ? {
+    model_name: model.best_model_name,
+    model_type: model.best_model_type,
+    primary_score: model.best_generalization_score ?? model.best_primary_score ?? 0,
+    best_params: model.best_params,
+    training_time: model.all_models?.find(m => m.model_name === model.best_model_name)?.optimization_time || 0,
+  } : {
     model_name: model.best_model_name,
     model_type: model.best_model_type,
     generalization_score: model.best_generalization_score,
@@ -217,10 +224,17 @@ export default function AutoMLModelDetail() {
                 <Database className="h-4 w-4" />
                 {model.dataset_name}
               </span>
-              <span className="flex items-center gap-1">
-                <Target className="h-4 w-4" />
-                {model.target_column}
-              </span>
+              {model.target_column && (
+                <span className="flex items-center gap-1">
+                  <Target className="h-4 w-4" />
+                  {model.target_column}
+                </span>
+              )}
+              {model.unsupervised_subtype && (
+                <Badge variant="outline">
+                  {model.unsupervised_subtype.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </Badge>
+              )}
             </div>
           </div>
         </div>
@@ -262,18 +276,85 @@ export default function AutoMLModelDetail() {
               </div>
               <div>
                 <CardTitle className="text-2xl">{bestModel.model_name}</CardTitle>
-                <CardDescription>Selected for best generalization performance</CardDescription>
+                <CardDescription>
+                  {isUnsupervised
+                    ? 'Best unsupervised model by primary score'
+                    : 'Selected for best generalization performance'}
+                </CardDescription>
               </div>
             </div>
             <div className="text-right">
               <div className="text-3xl font-bold text-primary">
-                {bestModel.generalization_score.toFixed(4)}
+                {(isUnsupervised ? bestModel.primary_score : bestModel.generalization_score)?.toFixed(4) ?? 'N/A'}
               </div>
-              <div className="text-sm text-muted-foreground">Generalization Score</div>
+              <div className="text-sm text-muted-foreground">
+                {isUnsupervised ? 'Primary Score' : 'Generalization Score'}
+              </div>
             </div>
           </div>
         </CardHeader>
         <CardContent className="pt-6">
+          {isUnsupervised ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+              {(() => {
+                const bestModelData = allModels.find(m => m.model_name === bestModel.model_name) || {};
+                const metrics = bestModelData.detailed_metrics || {};
+                return (
+                  <>
+                    {metrics.silhouette_score != null && (
+                      <div>
+                        <div className="text-sm text-muted-foreground mb-1">Silhouette Score</div>
+                        <div className="text-2xl font-semibold">{metrics.silhouette_score.toFixed(4)}</div>
+                      </div>
+                    )}
+                    {metrics.davies_bouldin_score != null && (
+                      <div>
+                        <div className="text-sm text-muted-foreground mb-1">Davies-Bouldin</div>
+                        <div className="text-2xl font-semibold">{metrics.davies_bouldin_score.toFixed(4)}</div>
+                      </div>
+                    )}
+                    {metrics.calinski_harabasz_score != null && (
+                      <div>
+                        <div className="text-sm text-muted-foreground mb-1">Calinski-Harabasz</div>
+                        <div className="text-2xl font-semibold">{metrics.calinski_harabasz_score.toFixed(2)}</div>
+                      </div>
+                    )}
+                    {metrics.total_explained_variance != null && (
+                      <div>
+                        <div className="text-sm text-muted-foreground mb-1">Explained Variance</div>
+                        <div className="text-2xl font-semibold">{(metrics.total_explained_variance * 100).toFixed(1)}%</div>
+                      </div>
+                    )}
+                    {metrics.n_components != null && (
+                      <div>
+                        <div className="text-sm text-muted-foreground mb-1">Components</div>
+                        <div className="text-2xl font-semibold">{metrics.n_components}</div>
+                      </div>
+                    )}
+                    {metrics.outlier_ratio != null && (
+                      <div>
+                        <div className="text-sm text-muted-foreground mb-1">Outlier Ratio</div>
+                        <div className="text-2xl font-semibold">{(metrics.outlier_ratio * 100).toFixed(1)}%</div>
+                      </div>
+                    )}
+                    {metrics.n_outliers != null && (
+                      <div>
+                        <div className="text-sm text-muted-foreground mb-1">Outliers Found</div>
+                        <div className="text-2xl font-semibold">{metrics.n_outliers}</div>
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-sm text-muted-foreground mb-1">Training Time</div>
+                      <div className="text-2xl font-semibold flex items-center gap-2">
+                        <Clock className="h-5 w-5" />
+                        {formatDuration(bestModel.training_time)}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             <div>
               <div className="text-sm text-muted-foreground mb-1">CV Score</div>
@@ -301,10 +382,25 @@ export default function AutoMLModelDetail() {
               </div>
             </div>
           </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Generalization Info Alert */}
+      {/* Selection Explanation Alert */}
+      {isUnsupervised ? (
+        <Alert>
+          <Sparkles className="h-4 w-4" />
+          <AlertTitle>Why This Model Was Selected</AlertTitle>
+          <AlertDescription>
+            <p>
+              This model was selected based on its <strong>primary unsupervised score</strong>.
+              {model.unsupervised_subtype === 'clustering' && ' For clustering, the silhouette score measures how well clusters are separated.'}
+              {model.unsupervised_subtype === 'dimensionality_reduction' && ' For dimensionality reduction, explained variance measures how much information is preserved.'}
+              {model.unsupervised_subtype === 'anomaly_detection' && ' For anomaly detection, separation quality between inliers and outliers is evaluated.'}
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : (
       <Alert>
         <Sparkles className="h-4 w-4" />
         <AlertTitle>Why This Model Was Selected</AlertTitle>
@@ -320,6 +416,7 @@ export default function AutoMLModelDetail() {
           </p>
         </AlertDescription>
       </Alert>
+      )}
 
       <Tabs defaultValue="plots" className="w-full">
         <TabsList className="grid w-full grid-cols-4">
@@ -386,17 +483,33 @@ export default function AutoMLModelDetail() {
                     <TableRow>
                       <TableHead className="w-[50px]">Rank</TableHead>
                       <TableHead>Model</TableHead>
-                      <TableHead className="text-right">Gen. Score</TableHead>
-                      <TableHead className="text-right">CV Score</TableHead>
-                      <TableHead className="text-right">Test Score</TableHead>
-                      <TableHead className="text-right">Overfit Gap</TableHead>
-                      <TableHead className="text-right">Training Time</TableHead>
-                      <TableHead>Status</TableHead>
+                      {isUnsupervised ? (
+                        <>
+                          <TableHead className="text-right">Primary Score</TableHead>
+                          <TableHead className="text-right">Trials</TableHead>
+                          <TableHead className="text-right">Training Time</TableHead>
+                          <TableHead>Status</TableHead>
+                        </>
+                      ) : (
+                        <>
+                          <TableHead className="text-right">Gen. Score</TableHead>
+                          <TableHead className="text-right">CV Score</TableHead>
+                          <TableHead className="text-right">Test Score</TableHead>
+                          <TableHead className="text-right">Overfit Gap</TableHead>
+                          <TableHead className="text-right">Training Time</TableHead>
+                          <TableHead>Status</TableHead>
+                        </>
+                      )}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {allModels
-                      .sort((a, b) => b.generalization_score - a.generalization_score)
+                      .sort((a, b) => {
+                        if (isUnsupervised) {
+                          return (b.primary_score ?? b.generalization_score ?? 0) - (a.primary_score ?? a.generalization_score ?? 0);
+                        }
+                        return b.generalization_score - a.generalization_score;
+                      })
                       .map((m, index) => (
                         <TableRow
                           key={m.model_name}
@@ -416,6 +529,29 @@ export default function AutoMLModelDetail() {
                               </Badge>
                             )}
                           </TableCell>
+                          {isUnsupervised ? (
+                            <>
+                              <TableCell className="text-right font-semibold text-primary">
+                                {(m.primary_score ?? m.generalization_score ?? 0).toFixed(4)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {m.n_trials ?? '-'}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {formatDuration(m.optimization_time)}
+                              </TableCell>
+                              <TableCell>
+                                {m.rejected ? (
+                                  <Badge variant="destructive">Rejected</Badge>
+                                ) : (
+                                  <Badge variant="outline" className="bg-green-500/10">
+                                    Valid
+                                  </Badge>
+                                )}
+                              </TableCell>
+                            </>
+                          ) : (
+                            <>
                           <TableCell className="text-right font-semibold text-primary">
                             {m.generalization_score.toFixed(4)}
                           </TableCell>
@@ -443,6 +579,8 @@ export default function AutoMLModelDetail() {
                               </Badge>
                             )}
                           </TableCell>
+                            </>
+                          )}
                         </TableRow>
                       ))}
                   </TableBody>
@@ -467,7 +605,9 @@ export default function AutoMLModelDetail() {
                 <div className="text-center">
                   <CheckCircle className="h-8 w-8 mx-auto mb-2 text-green-500" />
                   <div className="text-2xl font-bold">
-                    {allModels.filter(m => m.overfit_gap <= config.overfit_threshold_reject).length}
+                    {isUnsupervised
+                      ? allModels.filter(m => !m.rejected).length
+                      : allModels.filter(m => m.overfit_gap <= config.overfit_threshold_reject).length}
                   </div>
                   <div className="text-sm text-muted-foreground">Passed</div>
                 </div>
@@ -478,7 +618,9 @@ export default function AutoMLModelDetail() {
                 <div className="text-center">
                   <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-red-500" />
                   <div className="text-2xl font-bold">
-                    {allModels.filter(m => m.overfit_gap > config.overfit_threshold_reject).length}
+                    {isUnsupervised
+                      ? allModels.filter(m => m.rejected).length
+                      : allModels.filter(m => m.overfit_gap > config.overfit_threshold_reject).length}
                   </div>
                   <div className="text-sm text-muted-foreground">Rejected</div>
                 </div>
@@ -566,6 +708,13 @@ export default function AutoMLModelDetail() {
             <CardContent className="space-y-6">
               <div>
                 <h3 className="font-semibold mb-3">Overfitting Control</h3>
+                {isUnsupervised ? (
+                  <Alert>
+                    <AlertDescription>
+                      Overfitting control is not applicable for unsupervised learning tasks.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div className="border rounded-lg p-3">
                     <div className="text-sm text-muted-foreground mb-1">Penalty Factor</div>
@@ -584,6 +733,7 @@ export default function AutoMLModelDetail() {
                     </div>
                   </div>
                 </div>
+                )}
               </div>
 
               <Separator />
@@ -617,13 +767,18 @@ export default function AutoMLModelDetail() {
                     <div className="text-sm text-muted-foreground mb-1">Dataset</div>
                     <div className="font-medium">{model.dataset_name}</div>
                   </div>
-                  <div className="border rounded-lg p-3">
-                    <div className="text-sm text-muted-foreground mb-1">Target Column</div>
-                    <div className="font-mono text-sm">{model.target_column}</div>
-                  </div>
+                  {model.target_column && (
+                    <div className="border rounded-lg p-3">
+                      <div className="text-sm text-muted-foreground mb-1">Target Column</div>
+                      <div className="font-mono text-sm">{model.target_column}</div>
+                    </div>
+                  )}
                   <div className="border rounded-lg p-3">
                     <div className="text-sm text-muted-foreground mb-1">Task Type</div>
                     <Badge>{model.task_type}</Badge>
+                    {model.unsupervised_subtype && (
+                      <Badge variant="outline" className="ml-2">{model.unsupervised_subtype}</Badge>
+                    )}
                   </div>
                   <div className="border rounded-lg p-3">
                     <div className="text-sm text-muted-foreground mb-1">Dataset ID</div>
