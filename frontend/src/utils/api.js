@@ -327,6 +327,12 @@ export const automlAPI = {
     return response.data;
   },
 
+  /** Aggregated dashboard data for actionable overview */
+  getDashboard: async () => {
+    const response = await apiClient.get('/api/automl/dashboard');
+    return response.data;
+  },
+
   /** Fetch feature flags from backend (which features are enabled for MVP) */
   getFeatureFlags: async () => {
     const response = await apiClient.get('/api/automl/feature-flags');

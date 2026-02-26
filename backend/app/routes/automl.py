@@ -1499,6 +1499,238 @@ async def get_plot(plot_path: str):
     )
 
 
+@router.get("/dashboard")
+async def get_dashboard_data():
+    """
+    Aggregated dashboard data for the actionable overview page.
+    Returns training job status, best model, last dataset, attention items,
+    model comparison table, and an activity timeline.
+    """
+    import math
+
+    automl_store = get_store("automl_models")
+    datasets_store = get_store("datasets")
+
+    # ── Fetch raw data ────────────────────────────────────────────────
+    all_models_raw = []
+    async for doc in automl_store.find({}):
+        all_models_raw.append(doc)
+
+    all_datasets_raw = []
+    async for doc in datasets_store.find({}):
+        all_datasets_raw.append(doc)
+
+    # ── Training job status ────────────────────────────────────────────
+    training_status = training_manager.get_status()
+    is_running = training_status.get("is_running", False)
+    phase = training_status.get("phase", "idle")
+
+    completed_count = len(all_models_raw)
+    failed_count = 0  # We don't persist failed jobs yet; count models with 0 score
+    running_count = 1 if is_running else 0
+
+    active_training = None
+    if is_running:
+        active_training = {
+            "session_id": training_status.get("session_id"),
+            "current_model": training_status.get("current_model"),
+            "phase": phase,
+            "total_elapsed_seconds": training_status.get("total_elapsed_seconds", 0),
+            "models_completed_count": training_status.get("models_completed_count", 0),
+            "total_models": training_status.get("total_models", 0),
+            "current_trial": training_status.get("current_trial", 0),
+            "total_trials": training_status.get("total_trials", 0),
+        }
+
+    # ── Resolve dataset names ─────────────────────────────────────────
+    datasets_by_id = {}
+    for ds in all_datasets_raw:
+        ds_id = ds.get("_id", ds.get("id", ""))
+        datasets_by_id[ds_id] = ds
+
+    # ── Best performing model ─────────────────────────────────────────
+    best_model = None
+    best_score = -1.0
+    for m in all_models_raw:
+        score = m.get("best_test_score") or m.get("best_primary_score") or 0
+        if isinstance(score, (int, float)) and not math.isnan(score) and score > best_score:
+            best_score = score
+            best_model = m
+
+    best_model_card = None
+    if best_model:
+        ds_info = datasets_by_id.get(best_model.get("dataset_id"), {})
+        best_model_card = {
+            "id": best_model.get("_id"),
+            "name": best_model.get("name", "Unnamed"),
+            "dataset_name": ds_info.get("name", ds_info.get("filename", "Unknown")),
+            "best_model_type": best_model.get("best_model_type"),
+            "task_type": best_model.get("task_type"),
+            "score": round(best_score, 4),
+            "metric_name": "Test Score",
+            "created_at": best_model.get("created_at"),
+        }
+
+    # ── Last uploaded dataset ─────────────────────────────────────────
+    sorted_datasets = sorted(
+        all_datasets_raw,
+        key=lambda d: str(d.get("created_at", "")),
+        reverse=True,
+    )
+    last_dataset_card = None
+    if sorted_datasets:
+        ds = sorted_datasets[0]
+        total_missing = 0
+        total_cells = (ds.get("rows", 0) or 0) * (ds.get("columns", 0) or 0)
+        mv = ds.get("missing_values", {})
+        if isinstance(mv, dict):
+            for v in mv.values():
+                if isinstance(v, (int, float)):
+                    total_missing += v
+        missing_pct = round((total_missing / total_cells * 100), 1) if total_cells > 0 else 0
+        last_dataset_card = {
+            "id": ds.get("_id", ds.get("id", "")),
+            "name": ds.get("name", ds.get("filename", "Unknown")),
+            "rows": ds.get("rows", 0),
+            "columns": ds.get("columns", 0),
+            "missing_pct": missing_pct,
+            "is_processed": bool(ds.get("preprocessing_summary")),
+            "created_at": ds.get("created_at"),
+        }
+
+    # ── Needs Attention items ─────────────────────────────────────────
+    attention_items = []
+
+    # 1) Unprocessed datasets
+    unprocessed = [d for d in all_datasets_raw if not d.get("preprocessing_summary")]
+    if unprocessed:
+        attention_items.append({
+            "type": "unprocessed_datasets",
+            "severity": "warning",
+            "title": f"{len(unprocessed)} unprocessed dataset{'s' if len(unprocessed) != 1 else ''}",
+            "description": "These datasets need preprocessing before training.",
+            "items": [
+                {"id": d.get("_id", d.get("id", "")), "name": d.get("name", d.get("filename", "Unknown"))}
+                for d in unprocessed[:5]
+            ],
+        })
+
+    # 2) Low-performing models (test score < 0.60)
+    low_perf = []
+    for m in all_models_raw:
+        score = m.get("best_test_score") or m.get("best_primary_score") or 0
+        if isinstance(score, (int, float)) and not math.isnan(score) and score < 0.60:
+            low_perf.append(m)
+    if low_perf:
+        attention_items.append({
+            "type": "low_accuracy",
+            "severity": "error",
+            "title": f"{len(low_perf)} model{'s' if len(low_perf) != 1 else ''} below 60% accuracy",
+            "description": "Consider retraining with more data or different parameters.",
+            "items": [
+                {
+                    "id": m.get("_id"),
+                    "name": m.get("name", "Unnamed"),
+                    "score": round((m.get("best_test_score") or m.get("best_primary_score") or 0), 4),
+                }
+                for m in low_perf[:5]
+            ],
+        })
+
+    # 3) Class imbalance warnings from preprocessing metadata
+    imbalance_models = []
+    for m in all_models_raw:
+        meta = m.get("preprocessing_metadata") or {}
+        if meta.get("class_imbalance") or meta.get("imbalance_ratio"):
+            imbalance_models.append(m)
+    if imbalance_models:
+        attention_items.append({
+            "type": "class_imbalance",
+            "severity": "info",
+            "title": f"{len(imbalance_models)} model{'s' if len(imbalance_models) != 1 else ''} trained on imbalanced data",
+            "description": "Class imbalance was detected during preprocessing.",
+            "items": [
+                {"id": m.get("_id"), "name": m.get("name", "Unnamed")}
+                for m in imbalance_models[:5]
+            ],
+        })
+
+    # ── Model comparison table ────────────────────────────────────────
+    model_table = []
+    for m in all_models_raw:
+        ds_info = datasets_by_id.get(m.get("dataset_id"), {})
+        metrics = m.get("best_detailed_metrics") or {}
+        test_score = m.get("best_test_score") or m.get("best_primary_score")
+        if isinstance(test_score, float) and math.isnan(test_score):
+            test_score = None
+
+        model_table.append({
+            "id": m.get("_id"),
+            "name": m.get("name", "Unnamed"),
+            "dataset_name": ds_info.get("name", ds_info.get("filename", "Unknown")),
+            "task_type": m.get("task_type"),
+            "best_model_type": m.get("best_model_type"),
+            "accuracy": metrics.get("accuracy"),
+            "f1_score": metrics.get("f1_score"),
+            "test_score": round(test_score, 4) if test_score is not None else None,
+            "status": "completed",
+            "training_duration": m.get("training_duration"),
+            "created_at": m.get("created_at"),
+        })
+
+    # Sort by created_at descending
+    model_table.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+
+    # ── Activity timeline ─────────────────────────────────────────────
+    timeline = []
+
+    for ds in all_datasets_raw:
+        timeline.append({
+            "type": "dataset_upload",
+            "title": f"Dataset uploaded: {ds.get('name', ds.get('filename', 'Unknown'))}",
+            "timestamp": ds.get("created_at"),
+            "meta": {"rows": ds.get("rows", 0), "columns": ds.get("columns", 0)},
+        })
+        if ds.get("preprocessing_summary"):
+            pp_at = ds.get("preprocessed_at") or ds.get("created_at")
+            timeline.append({
+                "type": "dataset_processed",
+                "title": f"Dataset processed: {ds.get('name', ds.get('filename', 'Unknown'))}",
+                "timestamp": pp_at,
+            })
+
+    for m in all_models_raw:
+        timeline.append({
+            "type": "model_trained",
+            "title": f"Model trained: {m.get('name', 'Unnamed')}",
+            "timestamp": m.get("created_at"),
+            "meta": {
+                "best_model_type": m.get("best_model_type"),
+                "score": round((m.get("best_test_score") or m.get("best_primary_score") or 0), 4),
+            },
+        })
+
+    # Sort timeline by timestamp descending, limit to 15 recent
+    timeline.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+    timeline = timeline[:15]
+
+    return convert_numpy_types({
+        "training_jobs": {
+            "running": running_count,
+            "completed": completed_count,
+            "failed": failed_count,
+            "active_training": active_training,
+        },
+        "best_model": best_model_card,
+        "last_dataset": last_dataset_card,
+        "total_datasets": len(all_datasets_raw),
+        "total_models": len(all_models_raw),
+        "attention_items": attention_items,
+        "model_table": model_table,
+        "timeline": timeline,
+    })
+
+
 @router.get("/system-info")
 async def get_system_info():
     """Get system information like CPU count for frontend configuration"""

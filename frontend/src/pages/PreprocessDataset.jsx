@@ -996,26 +996,36 @@ export default function PreprocessDataset() {
         )}
 
         {/* Rare Values Review Section - INLINE */}
-        {preprocessingPhase === 'rare-values' && rareValueColumns.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-card border rounded-2xl p-8 space-y-6"
-          >
-            {/* Header with Navigation */}
+        {preprocessingPhase === 'rare-values' && rareValueColumns.length > 0 && (() => {
+          const currentColumn = rareValueColumns[currentRareValueIndex];
+          const totalRows = currentColumn?.rare_values[0]?.total_rows || 0;
+          const selectedCount = currentColumn?.rare_values.reduce((sum, rv) => sum + (selectedRareValues[rv.rare_value] ? rv.count : 0), 0) || 0;
+          const remainingRows = totalRows - selectedCount;
+          const impactPct = totalRows > 0 ? ((selectedCount / totalRows) * 100).toFixed(2) : '0.00';
+          const allSelected = currentColumn?.rare_values.every(rv => selectedRareValues[rv.rare_value]);
+
+          // Compute dynamic step number: Target = step 1, Rare Values = step 2
+          const hasOutlierStep = outlierData && Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length > 0;
+          const totalSteps = 2 + (hasOutlierStep ? 1 : 0) + 1; // target + rare + outliers? + processing
+
+          return (
+          <div className="bg-card border rounded-2xl p-8 space-y-6">
+            {/* ── Header ─────────────────────────────────────────────── */}
             <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-500/10 rounded-lg">
-                  <Sparkles className="w-6 h-6 text-purple-500" />
+              <div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                  <span>Step 2 of {totalSteps}</span>
+                  <span>·</span>
+                  <span>Rare Categories</span>
                 </div>
-                <div>
-                  <h2 className="text-2xl font-bold">Rare Values Review</h2>
-                  <p className="text-muted-foreground text-sm mt-1">
-                    Column {currentRareValueIndex + 1} of {rareValueColumns.length}: <span className="font-semibold">{rareValueColumns[currentRareValueIndex]?.name}</span>
-                  </p>
-                </div>
+                <h2 className="text-xl font-bold">
+                  {currentColumn?.name}
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">
+                    Column {currentRareValueIndex + 1} of {rareValueColumns.length}
+                  </span>
+                </h2>
               </div>
-              
+
               {/* Column Navigation */}
               {rareValueColumns.length > 1 && (
                 <div className="flex items-center gap-2">
@@ -1032,12 +1042,11 @@ export default function PreprocessDataset() {
                       }
                     }}
                     disabled={currentRareValueIndex === 0}
-                    className="p-2 border rounded-lg hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="p-1.5 border rounded-md hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Previous column"
                   >
-                    <ChevronLeft className="w-5 h-5" />
+                    <ChevronLeft className="w-4 h-4" />
                   </button>
-                  
                   <button
                     onClick={() => {
                       if (currentRareValueIndex < rareValueColumns.length - 1) {
@@ -1051,138 +1060,116 @@ export default function PreprocessDataset() {
                       }
                     }}
                     disabled={currentRareValueIndex === rareValueColumns.length - 1}
-                    className="p-2 border rounded-lg hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="p-1.5 border rounded-md hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Next column"
                   >
-                    <ChevronRight className="w-5 h-5" />
+                    <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Warning Banner */}
-            <div className="p-4 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="font-semibold text-yellow-900 dark:text-yellow-100 mb-1 text-sm">
-                    Rare Values Detected
-                  </h3>
-                  <p className="text-xs text-yellow-800 dark:text-yellow-200">
-                    These values occur very infrequently in your dataset and may not have enough samples for proper model training.
-                  </p>
-                </div>
-              </div>
-            </div>
+            {/* ── Compact Info Line ──────────────────────────────────── */}
+            <p className="text-sm text-muted-foreground">
+              <Info className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
+              {currentColumn?.rare_values.length} rare categor{currentColumn?.rare_values.length === 1 ? 'y' : 'ies'} detected below the <span className="font-medium text-foreground">&lt;2%</span> rarity threshold. Removing all would affect <span className="font-medium text-foreground">{totalRows > 0 ? ((currentColumn?.rare_values.reduce((s, rv) => s + rv.count, 0) / totalRows) * 100).toFixed(1) : 0}%</span> of rows.
+            </p>
 
-            {/* Current Column Info - Compact */}
-            {rareValueColumns[currentRareValueIndex] && (
+            {/* ── Impact Summary ─────────────────────────────────────── */}
+            {currentColumn && (
               <>
-                <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border">
-                  <div className="flex items-center gap-6">
-                    <div>
-                      <div className="text-xs text-muted-foreground">Rare Values</div>
-                      <div className="text-lg font-bold">{rareValueColumns[currentRareValueIndex].rare_values.length}</div>
-                    </div>
-                    <div className="w-px h-8 bg-border" />
-                    <div>
-                      <div className="text-xs text-muted-foreground">Rows After Removal</div>
-                      <div className="text-lg font-bold">{calculateRemainingRows(rareValueColumns[currentRareValueIndex]).toLocaleString()}</div>
-                    </div>
+                <div className="grid grid-cols-4 gap-4 text-center py-3 px-4 bg-muted/30 rounded-lg border">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Original Rows</div>
+                    <div className="text-lg font-semibold">{totalRows.toLocaleString()}</div>
                   </div>
-                  
-                  {/* Toggle Select/Deselect All */}
+                  <div>
+                    <div className="text-xs text-muted-foreground">Rows Removed</div>
+                    <div className={`text-lg font-semibold ${selectedCount > 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{selectedCount.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Impact</div>
+                    <div className={`text-lg font-semibold ${parseFloat(impactPct) > 5 ? 'text-red-600 dark:text-red-400' : parseFloat(impactPct) > 0 ? 'text-amber-600 dark:text-amber-400' : ''}`}>{impactPct}%</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Remaining</div>
+                    <div className="text-lg font-semibold">{remainingRows.toLocaleString()}</div>
+                  </div>
+                </div>
+
+                {/* ── Table Header with Select/Deselect All ──────────── */}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">{currentColumn.rare_values.length} rare categor{currentColumn.rare_values.length === 1 ? 'y' : 'ies'}</span>
                   <button
-                    onClick={() => {
-                      const allSelected = rareValueColumns[currentRareValueIndex]?.rare_values.every(
-                        rv => selectedRareValues[rv.rare_value]
-                      );
-                      if (allSelected) {
-                        deselectAllRareValues();
-                      } else {
-                        selectAllRareValues();
-                      }
-                    }}
-                    className="px-4 py-2 bg-background hover:bg-muted border rounded-lg transition-colors font-medium text-sm flex items-center gap-2"
+                    onClick={() => { allSelected ? deselectAllRareValues() : selectAllRareValues(); }}
+                    className="px-3 py-1.5 bg-background hover:bg-muted border rounded-md font-medium text-xs flex items-center gap-1.5"
                   >
-                    {rareValueColumns[currentRareValueIndex]?.rare_values.every(
-                      rv => selectedRareValues[rv.rare_value]
-                    ) ? (
-                      <>
-                        <XCircle className="w-4 h-4" />
-                        Deselect All
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="w-4 h-4" />
-                        Select All
-                      </>
-                    )}
+                    {allSelected ? <XCircle className="w-3.5 h-3.5" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                    {allSelected ? 'Deselect All' : 'Select All for Removal'}
                   </button>
                 </div>
 
-                {/* Rare Values List - Two Columns */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-96 overflow-y-auto">
-                  {rareValueColumns[currentRareValueIndex].rare_values.map((rv) => (
-                    <div
-                      key={rv.rare_value}
-                      onClick={() => toggleRareValue(rv.rare_value)}
-                      className="p-3 bg-background rounded-lg border hover:border-purple-300 dark:hover:border-purple-700 cursor-pointer transition-colors"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                {/* ── Structured Table ────────────────────────────────── */}
+                <div className="border rounded-lg overflow-hidden">
+                  {/* Table Header */}
+                  <div className="grid grid-cols-[1fr_100px_100px_60px] gap-2 px-4 py-2.5 bg-muted/50 border-b text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div>Category</div>
+                    <div className="text-right">Count</div>
+                    <div className="text-right">% of Dataset</div>
+                    <div className="text-center">Remove</div>
+                  </div>
+
+                  {/* Table Body */}
+                  <div className="max-h-80 overflow-y-auto divide-y">
+                    {currentColumn.rare_values.map((rv) => (
+                      <div
+                        key={rv.rare_value}
+                        onClick={() => toggleRareValue(rv.rare_value)}
+                        className={`grid grid-cols-[1fr_100px_100px_60px] gap-2 px-4 py-2.5 cursor-pointer hover:bg-muted/40 items-center ${
+                          selectedRareValues[rv.rare_value] ? 'bg-purple-50/50 dark:bg-purple-950/20' : ''
+                        }`}
+                      >
+                        <div className="font-medium text-sm truncate" title={String(rv.rare_value)}>
+                          {String(rv.rare_value)}
+                        </div>
+                        <div className="text-sm text-right tabular-nums text-muted-foreground">
+                          {rv.count.toLocaleString()}
+                        </div>
+                        <div className="text-sm text-right tabular-nums text-muted-foreground">
+                          {rv.percentage.toFixed(2)}%
+                        </div>
+                        <div className="flex justify-center">
                           <input
                             type="checkbox"
                             checked={selectedRareValues[rv.rare_value] || false}
                             onChange={() => {}}
-                            className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 flex-shrink-0"
+                            className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
                           />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">
-                              {String(rv.rare_value)}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {rv.count} samples ({rv.percentage.toFixed(2)}%)
-                            </div>
-                          </div>
-                        </div>
-                        <div className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
-                          rv.percentage < 1
-                            ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
-                            : rv.percentage < 2
-                            ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200'
-                            : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200'
-                        }`}>
-                          {rv.percentage < 1 ? 'Very Rare' : rv.percentage < 2 ? 'Rare' : 'Low Freq'}
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
 
                 {/* Target Column Warning */}
                 {checkTargetColumnImpact() && (
-                  <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                      <p className="text-xs text-red-800 dark:text-red-200">
-                        {checkTargetColumnImpact()}
-                      </p>
-                    </div>
+                  <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
+                    <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-800 dark:text-red-200">
+                      {checkTargetColumnImpact()}
+                    </p>
                   </div>
                 )}
               </>
             )}
 
-            {/* Action Buttons */}
-            <div className="grid grid-cols-3 gap-3 pt-4 border-t">
-              {/* Skip All Rare Values - Quick Action */}
+            {/* ── Action Buttons ─────────────────────────────────────── */}
+            <div className="flex items-center justify-between pt-4 border-t">
               <button
                 type="button"
                 onClick={async (e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  // Skip all columns and proceed
                   setRareValueSelections({});
                   rareValueSelectionsRef.current = {};
                   const taskTypeToUse = detectedTaskTypeRef.current;
@@ -1198,258 +1185,237 @@ export default function PreprocessDataset() {
                     startPreprocessing(dataset);
                   }
                 }}
-                className="px-4 py-3 bg-background hover:bg-muted border rounded-lg transition-colors font-medium text-sm"
+                className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted border rounded-lg"
               >
-                Skip All
+                Keep All Categories
               </button>
 
-              {/* Skip This Column */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleSkipColumn();
-                }}
-                className="px-4 py-3 bg-background hover:bg-muted border rounded-lg transition-colors font-medium text-sm"
-              >
-                Skip Column
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleSkipColumn();
+                  }}
+                  className="px-4 py-2 bg-background hover:bg-muted border rounded-lg font-medium text-sm"
+                >
+                  Skip This Column
+                </button>
 
-              {/* Confirm/Next */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleRareValueDecision();
-                }}
-                disabled={Object.values(selectedRareValues).every(v => !v)}
-                className="px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-              >
-                {currentRareValueIndex < rareValueColumns.length - 1 ? 'Next Column' : 'Confirm'}
-              </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleRareValueDecision();
+                  }}
+                  className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Apply Changes & Continue
+                </button>
+              </div>
             </div>
-          </motion.div>
-        )}
+          </div>
+          );
+        })()}
 
         {/* Outliers Review Section - INLINE */}
-        {preprocessingPhase === 'outliers' && outlierData && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-card border rounded-2xl p-8 space-y-6"
-          >
-            {/* Header */}
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-orange-500/10 rounded-lg">
-                  <TrendingUp className="w-6 h-6 text-orange-500" />
+        {preprocessingPhase === 'outliers' && outlierData && (() => {
+          const columnsWithOutliers = Object.entries(outlierData?.outliers_by_column || {})
+            .filter(([_, d]) => d.count > 0)
+            .sort((a, b) => b[1].percentage - a[1].percentage);
+
+          const totalDatasetRows = outlierData?.total_rows || columnsWithOutliers[0]?.[1]?.total_rows || 0;
+          const totalOutlierRows = columnsWithOutliers.reduce((sum, [_, d]) => sum + d.count, 0);
+          const highestPct = columnsWithOutliers.length > 0 ? columnsWithOutliers[0][1].percentage : 0;
+          const affectedCols = columnsWithOutliers.length;
+
+          // Live impact estimate based on current preferences
+          const rowsToRemove = columnsWithOutliers
+            .filter(([col]) => outlierPreferences[col] === 'remove')
+            .reduce((sum, [_, d]) => sum + d.count, 0);
+          const valuesToCap = columnsWithOutliers
+            .filter(([col]) => outlierPreferences[col] === 'cap')
+            .reduce((sum, [_, d]) => sum + d.count, 0);
+
+          // Dynamic step number: target=1, rare-values=2 (if present), outliers=2 or 3
+          const hasRareStep = rareValueColumns.length > 0;
+          const outlierStepNum = hasRareStep ? 3 : 2;
+          const totalSteps = 1 + (hasRareStep ? 1 : 0) + 1 + 1; // target + rare? + outliers + processing
+
+          const applyToAll = (strategy) => {
+            const prefs = {};
+            columnsWithOutliers.forEach(([col]) => { prefs[col] = strategy; });
+            setOutlierPreferences(prefs);
+          };
+
+          // Determine which global strategy is fully active
+          const allKeep = columnsWithOutliers.every(([col]) => outlierPreferences[col] === 'keep');
+          const allCap = columnsWithOutliers.every(([col]) => outlierPreferences[col] === 'cap');
+          const allRemove = columnsWithOutliers.every(([col]) => outlierPreferences[col] === 'remove');
+
+          return (
+          <div className="bg-card border rounded-2xl p-8 space-y-6">
+            {/* ── Header ─────────────────────────────────────────────── */}
+            <div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                <span>Step {outlierStepNum} of {totalSteps}</span>
+                <span>·</span>
+                <span>Outlier Handling</span>
+              </div>
+              <h2 className="text-xl font-bold">Outlier Handling</h2>
+            </div>
+
+            {/* ── Compact Info Line ──────────────────────────────────── */}
+            <p className="text-sm text-muted-foreground">
+              <Info className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
+              {affectedCols} column{affectedCols !== 1 ? 's' : ''} contain outliers identified via the IQR method. The default strategy is <span className="font-medium text-foreground">capping</span> (Winsorization to IQR bounds). Override per column as needed.
+            </p>
+
+            {/* ── Global Impact Summary ──────────────────────────────── */}
+            <div className="grid grid-cols-5 gap-4 text-center py-3 px-4 bg-muted/30 rounded-lg border">
+              <div>
+                <div className="text-xs text-muted-foreground">Total Rows</div>
+                <div className="text-lg font-semibold">{totalDatasetRows.toLocaleString()}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Rows w/ Outliers</div>
+                <div className="text-lg font-semibold">{totalOutlierRows.toLocaleString()}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Impact</div>
+                <div className={`text-lg font-semibold ${totalDatasetRows > 0 && (totalOutlierRows / totalDatasetRows * 100) > 10 ? 'text-red-600 dark:text-red-400' : ''}`}>
+                  {totalDatasetRows > 0 ? (totalOutlierRows / totalDatasetRows * 100).toFixed(1) : 0}%
                 </div>
-                <div>
-                  <h2 className="text-2xl font-bold">Outlier Handling</h2>
-                  <p className="text-muted-foreground text-sm mt-1">
-                    {Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length} column{Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length !== 1 ? 's' : ''} with outliers detected
-                  </p>
-                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Affected Cols</div>
+                <div className="text-lg font-semibold">{affectedCols}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Highest Col %</div>
+                <div className="text-lg font-semibold">{highestPct.toFixed(1)}%</div>
               </div>
             </div>
 
-            {/* Critical Warning Banner */}
-            <div className="p-4 bg-red-50 dark:bg-red-950/30 border-2 border-red-200 dark:border-red-800 rounded-xl">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="font-semibold text-red-900 dark:text-red-100 mb-1">
-                    ⚠️ Warning: Not All Outliers Are Bad!
-                  </h3>
-                  <p className="text-sm text-red-800 dark:text-red-200 leading-relaxed">
-                    Outliers can represent important patterns, rare events, or critical data points. Removing or modifying outliers without domain knowledge can lead to loss of valuable information. <span className="font-semibold">Always consult a domain expert</span> before making decisions about outlier handling.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Task-Specific Warning */}
-            {taskType && (
-              <div className={`p-4 rounded-xl border-2 ${
-                taskType === 'regression' 
-                  ? 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'
-                  : taskType === 'classification'
-                  ? 'bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800'
-                  : 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800'
-              }`}>
-                <div className="flex items-start gap-3">
-                  {taskType === 'regression' && <Target className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />}
-                  {taskType === 'classification' && <Target className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />}
-                  {taskType === 'unsupervised' && <Database className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />}
-                  <div className="flex-1">
-                    <h4 className={`font-semibold text-sm mb-1 ${
-                      taskType === 'regression' ? 'text-red-900 dark:text-red-100'
-                      : taskType === 'classification' ? 'text-yellow-900 dark:text-yellow-100'
-                      : 'text-blue-900 dark:text-blue-100'
-                    }`}>
-                      {taskType === 'regression' && 'Regression Task - Outliers Bias Model'}
-                      {taskType === 'classification' && 'Classification Task - Handle with Care'}
-                      {taskType === 'unsupervised' && 'Unsupervised Learning - Outliers Dominate Distances'}
-                    </h4>
-                    <p className={`text-xs ${
-                      taskType === 'regression' ? 'text-red-800 dark:text-red-200'
-                      : taskType === 'classification' ? 'text-yellow-800 dark:text-yellow-200'
-                      : 'text-blue-800 dark:text-blue-200'
-                    }`}>
-                      {taskType === 'regression' && 'In regression, outliers can significantly bias your model predictions. Consider capping or removing extreme values, but consult domain experts first.'}
-                      {taskType === 'classification' && 'Be careful not to remove outliers that might be important minority class examples. Capping is often safer than removal for classification tasks.'}
-                      {taskType === 'unsupervised' && 'In clustering and other unsupervised methods, outliers can dominate distance calculations. Consider using robust methods or capping extreme values.'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Global Actions */}
-            <div className="p-4 bg-muted/50 rounded-xl border">
-              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                <Info className="w-4 h-4" />
-                Quick Actions - Apply to All Columns
-              </h3>
-              <div className="flex gap-3">
+            {/* ── Default Strategy Selector ──────────────────────────── */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Default Strategy</span>
+              <div className="flex items-center gap-1 border rounded-lg p-0.5">
                 <button
-                  onClick={() => {
-                    const keepAllPrefs = {};
-                    Object.keys(outlierData?.outliers_by_column || {}).forEach(col => {
-                      if (outlierData.outliers_by_column[col].count > 0) {
-                        keepAllPrefs[col] = 'keep';
-                      }
-                    });
-                    setOutlierPreferences(keepAllPrefs);
-                  }}
-                  className="flex-1 px-4 py-3 bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-900/50 text-green-900 dark:text-green-100 rounded-lg border-2 border-green-300 dark:border-green-700 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                  onClick={() => applyToAll('keep')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium ${
+                    allKeep ? 'bg-foreground text-background' : 'hover:bg-muted'
+                  }`}
                 >
-                  <CheckCircle className="w-4 h-4" />
                   Keep All
                 </button>
                 <button
-                  onClick={() => {
-                    const capAllPrefs = {};
-                    Object.keys(outlierData?.outliers_by_column || {}).forEach(col => {
-                      if (outlierData.outliers_by_column[col].count > 0) {
-                        capAllPrefs[col] = 'cap';
-                      }
-                    });
-                    setOutlierPreferences(capAllPrefs);
-                  }}
-                  className="flex-1 px-4 py-3 bg-orange-100 dark:bg-orange-900/30 hover:bg-orange-200 dark:hover:bg-orange-900/50 text-orange-900 dark:text-orange-100 rounded-lg border-2 border-orange-300 dark:border-orange-700 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                  onClick={() => applyToAll('cap')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium ${
+                    allCap ? 'bg-foreground text-background' : 'hover:bg-muted'
+                  }`}
                 >
-                  <TrendingUp className="w-4 h-4" />
-                  Cap All (Recommended)
+                  Cap All
                 </button>
                 <button
-                  onClick={() => {
-                    const removeAllPrefs = {};
-                    Object.keys(outlierData?.outliers_by_column || {}).forEach(col => {
-                      if (outlierData.outliers_by_column[col].count > 0) {
-                        removeAllPrefs[col] = 'remove';
-                      }
-                    });
-                    setOutlierPreferences(removeAllPrefs);
-                  }}
-                  className="flex-1 px-4 py-3 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-900 dark:text-red-100 rounded-lg border-2 border-red-300 dark:border-red-700 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                  onClick={() => applyToAll('remove')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium ${
+                    allRemove ? 'bg-foreground text-background' : 'hover:bg-muted'
+                  }`}
                 >
-                  <XCircle className="w-4 h-4" />
-                  Remove All
+                  Remove Rows
                 </button>
               </div>
             </div>
 
-            {/* Column-by-Column Selection */}
-            <div className="space-y-3">
-              <h3 className="font-semibold mb-4">Per-Column Outlier Handling</h3>
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {Object.entries(outlierData?.outliers_by_column || {})
-                  .filter(([_, data]) => data.count > 0)
-                  .sort((a, b) => b[1].percentage - a[1].percentage)
-                  .map(([column, data]) => (
-                    <div
-                      key={column}
-                      className="p-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-orange-300 dark:hover:border-orange-700 transition-colors"
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex-1">
-                          <h4 className="font-semibold flex items-center gap-2 flex-wrap">
-                            {column}
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                              data.percentage > 15
-                                ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
-                                : data.percentage > 10
-                                ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200'
-                                : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200'
-                            }`}>
-                              {data.percentage.toFixed(1)}% outliers
-                            </span>
-                          </h4>
-                          <div className="text-sm text-muted-foreground mt-1">
-                            <span className="font-medium">{data.count}</span> outliers detected
-                            {' • '}Range: [{data.min.toFixed(2)} - {data.max.toFixed(2)}]
-                            {' • '}IQR bounds: [{data.lower_bound.toFixed(2)} - {data.upper_bound.toFixed(2)}]
-                          </div>
-                        </div>
-                      </div>
+            {/* ── Per-Column Table ────────────────────────────────────── */}
+            <div className="border rounded-lg overflow-hidden">
+              {/* Table Header */}
+              <div className="grid grid-cols-[1fr_80px_70px_140px_130px] gap-2 px-4 py-2.5 bg-muted/50 border-b text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                <div>Column</div>
+                <div className="text-right">Outliers</div>
+                <div className="text-right">%</div>
+                <div className="text-right">Value Range</div>
+                <div className="text-center">Strategy</div>
+              </div>
 
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setOutlierPreferences(prev => ({...prev, [column]: 'keep'}))}
-                          className={`flex-1 px-3 py-2 rounded-lg border-2 transition-all text-sm font-medium ${
-                            outlierPreferences[column] === 'keep'
-                              ? 'bg-green-100 dark:bg-green-900/30 border-green-500 dark:border-green-600 text-green-900 dark:text-green-100 shadow-sm'
-                              : 'bg-muted/50 border-gray-200 dark:border-gray-700 hover:border-green-300 dark:hover:border-green-700'
-                          }`}
-                        >
-                          Keep
-                        </button>
-                        <button
-                          onClick={() => setOutlierPreferences(prev => ({...prev, [column]: 'cap'}))}
-                          className={`flex-1 px-3 py-2 rounded-lg border-2 transition-all text-sm font-medium ${
-                            outlierPreferences[column] === 'cap'
-                              ? 'bg-orange-100 dark:bg-orange-900/30 border-orange-500 dark:border-orange-600 text-orange-900 dark:text-orange-100 shadow-sm'
-                              : 'bg-muted/50 border-gray-200 dark:border-gray-700 hover:border-orange-300 dark:hover:border-orange-700'
-                          }`}
-                        >
-                          Cap (Winsorize)
-                        </button>
-                        <button
-                          onClick={() => setOutlierPreferences(prev => ({...prev, [column]: 'remove'}))}
-                          className={`flex-1 px-3 py-2 rounded-lg border-2 transition-all text-sm font-medium ${
-                            outlierPreferences[column] === 'remove'
-                              ? 'bg-red-100 dark:bg-red-900/30 border-red-500 dark:border-red-600 text-red-900 dark:text-red-100 shadow-sm'
-                              : 'bg-muted/50 border-gray-200 dark:border-gray-700 hover:border-red-300 dark:hover:border-red-700'
-                          }`}
-                        >
-                          Remove Rows
-                        </button>
+              {/* Table Body */}
+              <div className="max-h-[420px] overflow-y-auto divide-y">
+                {columnsWithOutliers.map(([column, data]) => (
+                  <div key={column} className="grid grid-cols-[1fr_80px_70px_140px_130px] gap-2 px-4 py-2.5 items-center hover:bg-muted/30">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate" title={column}>{column}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        IQR [{data.lower_bound.toFixed(1)}, {data.upper_bound.toFixed(1)}]
                       </div>
                     </div>
-                  ))}
+                    <div className="text-sm text-right tabular-nums text-muted-foreground">
+                      {data.count.toLocaleString()}
+                    </div>
+                    <div className={`text-sm text-right tabular-nums ${
+                      data.percentage > 15 ? 'text-red-600 dark:text-red-400 font-medium' : data.percentage > 10 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+                    }`}>
+                      {data.percentage.toFixed(1)}%
+                    </div>
+                    <div className="text-xs text-right tabular-nums text-muted-foreground">
+                      {data.min.toFixed(2)} – {data.max.toFixed(2)}
+                    </div>
+                    <div className="flex justify-center">
+                      <select
+                        value={outlierPreferences[column] || 'keep'}
+                        onChange={(e) => setOutlierPreferences(prev => ({...prev, [column]: e.target.value}))}
+                        className="px-2 py-1 text-xs border rounded-md bg-background focus:ring-1 focus:ring-primary focus:outline-none w-full max-w-[120px]"
+                      >
+                        <option value="keep">Keep</option>
+                        <option value="cap">Cap (IQR)</option>
+                        <option value="remove">Remove Rows</option>
+                      </select>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex gap-3 pt-4 border-t">
-              <button
-                onClick={() => handleOutlierPreferences(outlierPreferences)}
-                className="px-6 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition-colors text-sm"
-              >
-                Apply Outlier Handling
-              </button>
+            {/* ── Live Impact Estimate ────────────────────────────────── */}
+            {(rowsToRemove > 0 || valuesToCap > 0) && (
+              <div className="flex items-center gap-6 px-4 py-3 bg-muted/30 rounded-lg border text-sm">
+                <span className="text-muted-foreground font-medium">Estimated impact:</span>
+                {valuesToCap > 0 && (
+                  <span>
+                    <span className="font-semibold text-amber-600 dark:text-amber-400">{valuesToCap.toLocaleString()}</span>
+                    <span className="text-muted-foreground ml-1">values capped</span>
+                  </span>
+                )}
+                {rowsToRemove > 0 && (
+                  <span>
+                    <span className="font-semibold text-red-600 dark:text-red-400">{rowsToRemove.toLocaleString()}</span>
+                    <span className="text-muted-foreground ml-1">rows removed</span>
+                    <span className="text-muted-foreground ml-1">({totalDatasetRows > 0 ? (rowsToRemove / totalDatasetRows * 100).toFixed(1) : 0}%)</span>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* ── Action Buttons ─────────────────────────────────────── */}
+            <div className="flex items-center justify-between pt-4 border-t">
               <button
                 onClick={handleSkipOutliers}
-                className="px-6 py-2.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 rounded-lg font-medium transition-colors text-sm"
+                className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted border rounded-lg"
               >
-                Skip (Keep All Outliers)
+                Skip This Step
+              </button>
+              <button
+                onClick={() => handleOutlierPreferences(outlierPreferences)}
+                className="px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium text-sm"
+              >
+                Apply Strategy & Continue
               </button>
             </div>
-          </motion.div>
-        )}
+          </div>
+          );
+        })()}
 
         {/* Two Column Layout - Like EDA */}
         {!showTargetSelection && preprocessingPhase !== 'rare-values' && preprocessingPhase !== 'outliers' && (
