@@ -69,6 +69,13 @@ export default function TrainAutoMLModel() {
   const [expandedLogs, setExpandedLogs] = useState({});
   const [maxCpuCores, setMaxCpuCores] = useState(16);
 
+  // TODO: Re-enable in v2 after full validation
+  // Feature flags fetched from backend — controls UI visibility of disabled features
+  const [featureFlags, setFeatureFlags] = useState({
+    enable_unsupervised: false,
+    enable_text_processing: false,
+  });
+
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -163,6 +170,12 @@ export default function TrainAutoMLModel() {
           },
         }));
       }
+    }).catch(() => {});
+
+    // TODO: Re-enable in v2 after full validation
+    // Fetch feature flags to control UI visibility of disabled features
+    automlAPI.getFeatureFlags().then(flags => {
+      if (flags) setFeatureFlags(flags);
     }).catch(() => {});
   }, []);
 
@@ -408,8 +421,15 @@ export default function TrainAutoMLModel() {
 
   const canProceedStep1 = formData.name && formData.dataset_id;
   const taskType = selectedDataset?.preprocessing_summary?.task_type || 'classification';
-  const isUnsupervised = taskType === 'unsupervised';
+  // TODO: Re-enable in v2 after full validation
+  // When unsupervised is disabled, treat unsupervised datasets as not selectable
+  const isUnsupervised = featureFlags.enable_unsupervised && taskType === 'unsupervised';
   const modelKey = isUnsupervised ? `unsupervised_${unsupervisedSubtype}` : taskType;
+
+  // Filter datasets: hide unsupervised-type datasets when feature is disabled
+  const displayedDatasets = featureFlags.enable_unsupervised
+    ? processedDatasets
+    : processedDatasets.filter(d => d.preprocessing_summary?.task_type !== 'unsupervised');
 
   const steps = [
     { number: 1, title: 'Dataset & Info', icon: Database },
@@ -495,7 +515,7 @@ export default function TrainAutoMLModel() {
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
-              ) : processedDatasets.length === 0 ? (
+              ) : displayedDatasets.length === 0 ? (
                 <Alert>
                   <Info className="h-4 w-4" />
                   <AlertDescription>
@@ -517,7 +537,7 @@ export default function TrainAutoMLModel() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="w-[600px] max-h-[400px] overflow-y-auto" align="start">
-                      {processedDatasets.map((dataset) => (
+                      {displayedDatasets.map((dataset) => (
                         <DropdownMenuItem
                           key={dataset.id}
                           onClick={() => handleDatasetSelect(dataset.id)}

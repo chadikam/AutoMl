@@ -4,7 +4,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { datasetsAPI } from '../utils/api';
+import { datasetsAPI, automlAPI } from '../utils/api';
 
 const ProcessedDatasets = () => {
   const navigate = useNavigate();
@@ -29,8 +29,18 @@ const ProcessedDatasets = () => {
   const [taskTypeFilter, setTaskTypeFilter] = useState('all');
   const itemsPerPage = 10;
 
+  // TODO: Re-enable in v2 after full validation
+  const [featureFlags, setFeatureFlags] = useState({
+    enable_unsupervised: false,
+    enable_text_processing: false,
+  });
+
   useEffect(() => {
     fetchDatasets();
+    // Fetch feature flags
+    automlAPI.getFeatureFlags().then(flags => {
+      if (flags) setFeatureFlags(flags);
+    }).catch(() => {});
   }, []);
 
   // Refetch when user navigates to this page
@@ -417,7 +427,10 @@ const ProcessedDatasets = () => {
                   <option value="all">All Types</option>
                   <option value="classification">Classification</option>
                   <option value="regression">Regression</option>
-                  <option value="clustering">Unsupervised</option>
+                  {/* TODO: Re-enable in v2 after full validation */}
+                  {featureFlags.enable_unsupervised && (
+                    <option value="clustering">Unsupervised</option>
+                  )}
                 </select>
 
                 <select
@@ -604,7 +617,8 @@ const ProcessedDatasets = () => {
                                     Train/Test Split
                                   </span>
                                 )}
-                                {dataset.preprocessing_summary?.text_features?.columns?.length > 0 && (
+                                {/* TODO: Re-enable in v2 after full validation */}
+                                {featureFlags.enable_text_processing && dataset.preprocessing_summary?.text_features?.columns?.length > 0 && (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />

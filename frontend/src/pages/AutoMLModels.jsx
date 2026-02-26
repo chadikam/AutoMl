@@ -48,6 +48,13 @@ export default function AutoMLModels() {
   const [selectedModels, setSelectedModels] = useState([]);
   const [deleting, setDeleting] = useState(false);
 
+  // TODO: Re-enable in v2 after full validation
+  // Feature flags fetched from backend
+  const [featureFlags, setFeatureFlags] = useState({
+    enable_unsupervised: false,
+    enable_text_processing: false,
+  });
+
   // Save view mode preference
   useEffect(() => {
     localStorage.setItem('automl-view-mode', viewMode);
@@ -55,6 +62,10 @@ export default function AutoMLModels() {
 
   useEffect(() => {
     fetchModels();
+    // Fetch feature flags
+    automlAPI.getFeatureFlags().then(flags => {
+      if (flags) setFeatureFlags(flags);
+    }).catch(() => {});
   }, []);
 
   const fetchModels = async () => {
@@ -239,7 +250,8 @@ export default function AutoMLModels() {
               />
             </div>
             <div className="flex gap-2">
-              {['all', 'classification', 'regression', 'clustering'].map((type) => (
+              {/* TODO: Re-enable 'clustering' / 'unsupervised' filter in v2 after full validation */}
+              {['all', 'classification', 'regression', ...(featureFlags.enable_unsupervised ? ['clustering'] : [])].map((type) => (
                 <Button
                   key={type}
                   variant={filterTaskType === type ? 'default' : 'outline'}

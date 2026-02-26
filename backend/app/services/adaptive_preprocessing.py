@@ -15,7 +15,6 @@ from sklearn.preprocessing import (
     OneHotEncoder, OrdinalEncoder, LabelEncoder,
     PowerTransformer, FunctionTransformer
 )
-from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -34,6 +33,14 @@ import re
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Feature flags
+from app.feature_flags import FeatureFlags
+
+# TODO: Re-enable in v2 after full validation
+# TF-IDF imports are deferred behind the feature flag
+if FeatureFlags.ENABLE_TEXT_PROCESSING:
+    from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 
 # Optional: VIF calculation for advanced multicollinearity diagnostics
 try:
@@ -223,6 +230,10 @@ class TextVectorizer(BaseEstimator, TransformerMixin):
     """
     Custom text vectorizer for text columns.
     Handles multiple text columns and concatenates their TF-IDF features.
+
+    TODO: Re-enable in v2 after full validation
+    NOTE: This class is only instantiated when FeatureFlags.ENABLE_TEXT_PROCESSING is True.
+    TfidfVectorizer is imported lazily inside methods to avoid import errors when disabled.
     """
     def __init__(self, max_features=5000, min_df=2, max_df=0.95):
         self.max_features = max_features
@@ -233,6 +244,7 @@ class TextVectorizer(BaseEstimator, TransformerMixin):
     
     def fit(self, X, y=None):
         """Fit TF-IDF vectorizers for each text column"""
+        from sklearn.feature_extraction.text import TfidfVectorizer  # lazy import
         X_df = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X
         
         for col in X_df.columns:
@@ -1165,8 +1177,9 @@ class AdaptivePreprocessor:
                     print(f"   ✓ '{col}' -> datetime (parsing)")
                 else:
                     # Check if this is a text column (long strings, not categorical)
+                    # TODO: Re-enable in v2 after full validation
                     is_text = False
-                    if df[col].dtype == 'object' or pd.api.types.is_string_dtype(df[col]):
+                    if FeatureFlags.ENABLE_TEXT_PROCESSING and (df[col].dtype == 'object' or pd.api.types.is_string_dtype(df[col])):
                         non_null_vals = df[col].dropna()
                         if len(non_null_vals) > 0:
                             # Calculate text characteristics
@@ -2892,7 +2905,8 @@ class AdaptivePreprocessor:
                 )
         
         # Text features (TF-IDF vectorization)
-        if self.text_features:
+        # TODO: Re-enable in v2 after full validation
+        if self.text_features and FeatureFlags.ENABLE_TEXT_PROCESSING:
             print(f"\n📝 Creating text pipeline for {len(self.text_features)} text columns: {self.text_features}")
             
             text_pipeline = Pipeline(steps=[

@@ -31,13 +31,19 @@ from app.models.schemas import (
 )
 from app.storage import get_store, generate_id
 from app.services.automl_engine import AutoMLEngine, TaskType, ModelResult
-from app.services.unsupervised_engine import (
-    UnsupervisedEngine, UnsupervisedTaskType, UnsupervisedModelResult, UnsupervisedResult,
-)
 from app.services.automl_plots import AutoMLPlotter
 from app.services.adaptive_preprocessing import AdaptivePreprocessor
 from app.services.training_manager import TrainingManager, TrainingPhase
 from app.config import settings
+from app.feature_flags import FeatureFlags
+
+# TODO: Re-enable in v2 after full validation
+# Unsupervised imports are deferred behind the feature flag so the module
+# still loads cleanly even when the flag is off.
+if FeatureFlags.ENABLE_UNSUPERVISED:
+    from app.services.unsupervised_engine import (
+        UnsupervisedEngine, UnsupervisedTaskType, UnsupervisedModelResult, UnsupervisedResult,
+    )
 
 # Legacy global cancellation tracker (kept for backward compatibility)
 active_trainings = {}
@@ -121,16 +127,27 @@ async def start_training(
             detail=f"Training session '{training_manager._session_id}' is already running. Cancel it first."
         )
 
+    # ── Feature-flag guards ─────────────────────────────────────────
+    task_type_str = request.task_type.value if request.task_type else "classification"
+
+    # TODO: Re-enable in v2 after full validation
+    if task_type_str in ("unsupervised", "clustering") and not FeatureFlags.ENABLE_UNSUPERVISED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupervised learning is temporarily disabled for MVP. Only classification and regression are supported.",
+        )
+    # ────────────────────────────────────────────────────────────────
+
     # Create unique training ID
     training_id = generate_id()
     
     # Determine which models will be trained
-    task_type_str = request.task_type.value if request.task_type else "classification"
     is_unsupervised = task_type_str in ("unsupervised", "clustering")
     models_to_train = request.config.models_to_train
 
     if not models_to_train:
-        if is_unsupervised:
+        # TODO: Re-enable unsupervised branch in v2 after full validation
+        if is_unsupervised and FeatureFlags.ENABLE_UNSUPERVISED:
             # Determine unsupervised sub-task model list
             subtype = request.unsupervised_subtype
             if subtype and subtype.value == "dimensionality_reduction":
@@ -151,7 +168,7 @@ async def start_training(
         elif task_type_str == "regression":
             models_to_train = list(AutoMLEngine.REGRESSION_MODELS.keys())
         else:
-            models_to_train = list(AutoMLEngine.CLUSTERING_MODELS.keys())
+            models_to_train = list(AutoMLEngine.CLASSIFICATION_MODELS.keys())
     
     # Initialize TrainingManager session
     training_manager.start_session(
@@ -343,7 +360,11 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
             training_manager.add_log("Loading raw dataset")
             df = pd.read_csv(dataset["file_path"], sep=None, engine='python', skipinitialspace=True)
 
-            is_unsupervised = request.task_type in (AutoMLTaskType.UNSUPERVISED, AutoMLTaskType.CLUSTERING) and not request.target_column
+            is_unsupervised = (
+                FeatureFlags.ENABLE_UNSUPERVISED
+                and request.task_type in (AutoMLTaskType.UNSUPERVISED, AutoMLTaskType.CLUSTERING)
+                and not request.target_column
+            )
             target_column = request.target_column if request.target_column else None
 
             if not is_unsupervised:
@@ -354,7 +375,8 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
             X_test, y_test = None, None
 
             # Preprocessing
-            if is_unsupervised:
+            # TODO: Re-enable unsupervised preprocessing in v2 after full validation
+            if is_unsupervised and FeatureFlags.ENABLE_UNSUPERVISED:
                 # ─── Geometry-aware unsupervised preprocessing ───
                 # Uses UnsupervisedPreprocessor which:
                 #   1. Removes ID/constant columns
@@ -450,12 +472,16 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
         training_manager.set_phase(TrainingPhase.TRAINING)
 
         is_unsupervised_task = (
-            request.task_type == AutoMLTaskType.UNSUPERVISED or
-            (request.task_type == AutoMLTaskType.CLUSTERING and y is None) or
-            (y is None and not request.target_column)
+            FeatureFlags.ENABLE_UNSUPERVISED
+            and (
+                request.task_type == AutoMLTaskType.UNSUPERVISED or
+                (request.task_type == AutoMLTaskType.CLUSTERING and y is None) or
+                (y is None and not request.target_column)
+            )
         )
 
-        if is_unsupervised_task:
+        # TODO: Re-enable in v2 after full validation
+        if is_unsupervised_task and FeatureFlags.ENABLE_UNSUPERVISED:
             # ──── UNSUPERVISED TRAINING PATH ────
             await _run_unsupervised_training(
                 training_manager, request, X_transformed, feature_names,
@@ -470,7 +496,8 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
         elif request.task_type == AutoMLTaskType.REGRESSION:
             task_type = TaskType.REGRESSION
         else:
-            task_type = TaskType.CLUSTERING
+            # Fallback to classification (unsupervised is gated by feature flag above)
+            task_type = TaskType.CLASSIFICATION
 
         use_presplit_data = is_preprocessed and X_test is not None
 
@@ -1484,4 +1511,16 @@ async def get_system_info():
     
     return {
         "cpu_count": cpu_count or 4,
+    }
+
+
+@router.get("/feature-flags")
+async def get_feature_flags():
+    """
+    Return current feature flags so the frontend can hide/show UI elements.
+    TODO: Re-enable in v2 after full validation
+    """
+    return {
+        "enable_unsupervised": FeatureFlags.ENABLE_UNSUPERVISED,
+        "enable_text_processing": FeatureFlags.ENABLE_TEXT_PROCESSING,
     }
