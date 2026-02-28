@@ -90,39 +90,27 @@ class ModelResult:
     model_type: str
     task_type: TaskType
     
-    # Trained model
-    best_model: Any
-    best_params: Dict[str, Any]
+    # Trained model (None for cancelled/failed)
+    best_model: Any = None
+    best_params: Dict[str, Any] = field(default_factory=dict)
     
     # Scores
-    train_score: float
-    cv_score: float
-    cv_std: float
-    test_score: float
+    train_score: float = 0.0
+    cv_score: float = 0.0
+    cv_std: float = 0.0
+    test_score: float = 0.0
     
     # Overfitting metrics
-    overfit_gap: float
-    penalty: float
-    generalization_score: float
-    overfitting: str
-    rejected: bool
-    rejection_reason: Optional[str]
-    
-    # Additional info
-    detailed_metrics: Dict[str, Any]
-    feature_importance: Optional[Dict[str, float]]
-    n_trials: int
-    optimization_time: float
+    overfit_gap: float = 0.0
+    penalty: float = 0.0
+    generalization_score: float = 0.0
+    overfitting: bool = False
+    rejected: bool = False
+    rejection_reason: Optional[str] = None
     
     # Stability info
-    stability_status: str = "stable"  # "stable", "unstable", "skipped"
+    stability_status: str = "stable"  # "stable", "unstable", "skipped", "cancelled"
     stability_reason: Optional[str] = None
-    generalization_score: float
-    
-    # Status flags
-    overfitting: bool
-    rejected: bool
-    rejection_reason: Optional[str] = None
     
     # Detailed metrics
     detailed_metrics: Dict[str, Any] = field(default_factory=dict)
@@ -358,9 +346,11 @@ class AutoMLEngine:
         os.environ['NUMEXPR_NUM_THREADS'] = str(self.max_cpu_cores)
         
         # Force CPU affinity at OS level (Windows/Linux compatible)
+        self._original_affinity = None
         try:
             import psutil
             process = psutil.Process()
+            self._original_affinity = process.cpu_affinity()
             total_cores = psutil.cpu_count(logical=True)
             
             # Limit to specific CPU cores (0, 1, 2, ... up to max_cpu_cores-1)
@@ -374,6 +364,17 @@ class AutoMLEngine:
             if self.verbose:
                 print(f"⚠ Could not set CPU affinity: {e}")
                 print(f"  Using environment variables only")
+    
+    def _restore_cpu_limits(self):
+        """Restore original CPU affinity after training completes"""
+        if self._original_affinity is not None:
+            try:
+                import psutil
+                psutil.Process().cpu_affinity(self._original_affinity)
+                if self.verbose:
+                    print(f"✓ CPU affinity restored to original cores")
+            except Exception:
+                pass
     
     def _check_memory_usage(self):
         """Monitor and manage memory usage during training"""
@@ -726,8 +727,13 @@ class AutoMLEngine:
             if model_name == 'logistic_regression':
                 if params['penalty'] is None:
                     params.pop('C', None)
-                elif params['penalty'] == 'l1' and params['solver'] == 'lbfgs':
-                    params['solver'] = 'liblinear'
+                    # liblinear doesn't support penalty=None
+                    if params.get('solver') == 'liblinear':
+                        params['solver'] = 'lbfgs'
+                elif params['penalty'] == 'l1':
+                    # lbfgs doesn't support l1 penalty
+                    if params.get('solver') == 'lbfgs':
+                        params['solver'] = 'liblinear'
             
             # Check cancellation before creating model
             if cancellation_callback and cancellation_callback():
@@ -901,6 +907,10 @@ class AutoMLEngine:
             penalty_multiplier = self.penalty_factor  # Normal penalty
         
         penalty = overfit_gap * penalty_multiplier
+        # NOTE: generalization_score can be negative for severely overfitting models.
+        # This is intentional — negative scores correctly rank bad models below good ones.
+        # The score is: cv_score - (overfit_gap * penalty_multiplier)
+        # For display purposes, the frontend can clamp to 0 if desired.
         generalization_score = cv_score - penalty
         
         overfitting = overfit_gap > 0.05  # Flag if gap > 5%
@@ -1003,16 +1013,9 @@ class AutoMLEngine:
                 model_name=model_name,
                 model_type=model_class.__name__,
                 task_type=self.task_type,
-                best_model=None,
-                best_params={},
                 cv_score=-9999,
                 test_score=-9999,
                 generalization_score=-9999,
-                overfit_gap=0.0,
-                training_time=0.0,
-                feature_importances={},
-                predictions=np.array([]),
-                cv_scores=[],
                 stability_status="cancelled",
                 stability_reason="Training cancelled by user"
             )
@@ -1042,16 +1045,10 @@ class AutoMLEngine:
                 model_name=model_name,
                 model_type=model_class.__name__,
                 task_type=self.task_type,
-                best_model=None,
-                best_params={},
                 cv_score=-9999,
                 test_score=-9999,
                 generalization_score=-9999,
-                overfit_gap=0.0,
-                training_time=optimization_time,
-                feature_importances={},
-                predictions=np.array([]),
-                cv_scores=[],
+                optimization_time=optimization_time,
                 stability_status="skipped",
                 stability_reason="Model skipped by user"
             )
@@ -1064,16 +1061,10 @@ class AutoMLEngine:
                 model_name=model_name,
                 model_type=model_class.__name__,
                 task_type=self.task_type,
-                best_model=None,
-                best_params={},
                 cv_score=-9999,
                 test_score=-9999,
                 generalization_score=-9999,
-                overfit_gap=0.0,
-                training_time=optimization_time,
-                feature_importances={},
-                predictions=np.array([]),
-                cv_scores=[],
+                optimization_time=optimization_time,
                 stability_status="cancelled",
                 stability_reason="Training cancelled by user"
             )
@@ -1124,16 +1115,24 @@ class AutoMLEngine:
         
         # Handle parameter compatibility
         if model_name == 'logistic_regression':
-            if best_params.get('penalty') == 'none':
+            if best_params.get('penalty') is None:
                 best_params.pop('C', None)
-            elif best_params.get('penalty') == 'l1' and best_params.get('solver') == 'lbfgs':
-                best_params['solver'] = 'liblinear'
+                if best_params.get('solver') == 'liblinear':
+                    best_params['solver'] = 'lbfgs'
+            elif best_params.get('penalty') == 'l1':
+                if best_params.get('solver') == 'lbfgs':
+                    best_params['solver'] = 'liblinear'
         
         # Train final model with best parameters
         best_model = model_class(**best_params)
         best_model.fit(X_train, y_train)
         
         # ===== CALCULATE SCORES =====
+        # NOTE: The CV score here may differ slightly from Optuna's trial scores because:
+        # 1. Optuna's objective uses a SUBSET of data per trial with different hyperparameters
+        # 2. Here we retrain the BEST model on the full training set and re-run CV
+        # 3. The random CV fold splits may differ between Optuna trials and this final evaluation
+        # This is expected and correct — this final score is the authoritative one.
         if self.task_type == TaskType.CLASSIFICATION:
             # Train score
             train_pred = best_model.predict(X_train)
@@ -1389,15 +1388,10 @@ class AutoMLEngine:
                     result = ModelResult(
                         model_name=model_name,
                         model_type=model_class.__name__,
+                        task_type=self.task_type,
                         cv_score=-9999,
                         test_score=-9999,
                         generalization_score=-9999,
-                        overfit_gap=0.0,
-                        best_params={},
-                        training_time=0.0,
-                        feature_importances={},
-                        predictions=np.array([]),
-                        cv_scores=[],
                         stability_status="cancelled",
                         stability_reason="Training cancelled by user"
                     )
@@ -1512,6 +1506,9 @@ class AutoMLEngine:
             if all_rejected:
                 print(f"⚠️  Note: This model was rejected but selected as best available")
             print(f"{'='*60}")
+        
+        # Restore CPU affinity before returning
+        self._restore_cpu_limits()
         
         # Create AutoML result
         automl_result = AutoMLResult(

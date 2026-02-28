@@ -379,8 +379,8 @@ const DataQualityTabs = ({ recommendations, edaResults }) => {
             transition={{ delay: index * 0.05 }}
             className="flex items-start gap-3 text-sm bg-white dark:bg-gray-900/50 p-3 rounded-lg border"
           >
-            <span className="text-blue-600 dark:text-blue-400 mt-0.5">
-              {rec.includes('⚠️') ? '⚠️' : '•'}
+            <span className="text-muted-foreground mt-0.5">
+              {rec.includes('⚠️') ? <AlertTriangle className="w-4 h-4" /> : '•'}
             </span>
             <span className="flex-1">{rec.replace('⚠️ ', '')}</span>
           </motion.li>

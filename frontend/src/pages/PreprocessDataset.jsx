@@ -684,173 +684,155 @@ export default function PreprocessDataset() {
         </div>
 
         {/* Workflow Timeline Stepper */}
-        <div className="bg-card border rounded-2xl p-6">
-          <div className="flex items-center justify-between">
+        <div className="bg-card border rounded-2xl px-6 py-4">
+          <div className="flex items-center">
             {/* Step 1: Target Selection */}
-            <div className="flex items-center gap-3 flex-1">
-              <button
-                onClick={() => {
-                  if (!preprocessing && !results) {
-                    setPreprocessingPhase('idle');
-                    setShowTargetSelection(true);
-                  }
-                }}
-                disabled={preprocessing || results}
-                className={`flex items-center gap-3 transition-all ${preprocessing || results ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:scale-105'}`}
-              >
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all ${
+            <button
+              onClick={() => {
+                if (!preprocessing && !results) {
+                  setPreprocessingPhase('idle');
+                  setShowTargetSelection(true);
+                }
+              }}
+              disabled={preprocessing || results}
+              className={`flex items-center gap-2.5 shrink-0 ${preprocessing || results ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+            >
+              <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${
+                preprocessingPhase === 'idle' || preprocessingPhase === 'target' || showTargetSelection
+                  ? 'bg-foreground ring-[3px] ring-foreground/20'
+                  : 'bg-muted-foreground/40'
+              }`} />
+              <div className="text-left">
+                <div className={`text-sm font-medium leading-tight ${
                   preprocessingPhase === 'idle' || preprocessingPhase === 'target' || showTargetSelection
-                    ? 'bg-primary text-primary-foreground shadow-lg'
-                    : 'bg-muted text-muted-foreground'
+                    ? 'text-foreground'
+                    : 'text-muted-foreground'
                 }`}>
-                  1
+                  Target Column
                 </div>
-                <div className="text-left">
-                  <div className={`font-semibold text-sm ${
-                    preprocessingPhase === 'idle' || preprocessingPhase === 'target' || showTargetSelection
-                      ? 'text-foreground'
-                      : 'text-muted-foreground'
-                  }`}>
-                    Target Column
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {targetColumn || 'Not selected'}
-                  </div>
+                <div className="text-[11px] text-muted-foreground leading-tight">
+                  {targetColumn || 'Not selected'}
                 </div>
-              </button>
-            </div>
+              </div>
+            </button>
               
             {/* Connector Line */}
-            <div className={`h-0.5 mx-2 transition-colors ${
+            <div className={`flex-1 h-px mx-4 transition-colors ${
               preprocessingPhase === 'rare-values' || preprocessingPhase === 'outliers' || preprocessingPhase === 'processing' || results || (rareValueColumns.length === 0 && outlierData && Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length > 0) || (rareValueColumns.length === 0 && outlierData && Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length === 0)
-                ? 'bg-primary'
-                : 'bg-muted'
+                ? 'bg-foreground/30'
+                : 'bg-border'
             }`} />
 
             {/* Step 2: Rare Values (conditional) */}
             {rareValueColumns.length > 0 && (
               <>
-                <div className="flex items-center gap-3 flex-1">
-                  <button
-                    onClick={() => {
-                      if (!preprocessing && !results && preprocessingPhase !== 'idle' && preprocessingPhase !== 'target') {
-                        setPreprocessingPhase('rare-values');
-                        setShowTargetSelection(false);
-                      }
-                    }}
-                    disabled={preprocessing || results || preprocessingPhase === 'idle' || preprocessingPhase === 'target'}
-                    className={`flex items-center gap-3 transition-all ${
-                      preprocessing || results || preprocessingPhase === 'idle' || preprocessingPhase === 'target'
-                        ? 'cursor-not-allowed opacity-50'
-                        : 'cursor-pointer hover:scale-105'
-                    }`}
-                  >
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all ${
-                      preprocessingPhase === 'rare-values'
-                        ? 'bg-primary text-primary-foreground shadow-lg'
-                        : (preprocessingPhase === 'outliers' || preprocessingPhase === 'processing' || results)
-                        ? 'bg-primary/50 text-primary-foreground'
-                        : 'bg-muted text-muted-foreground'
-                    }`}>
-                      2
-                    </div>
-                    <div className="text-left">
-                      <div className={`font-semibold text-sm ${
-                        preprocessingPhase === 'rare-values'
-                          ? 'text-foreground'
-                          : 'text-muted-foreground'
-                      }`}>
-                        Rare Values
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {rareValueColumns.length} column{rareValueColumns.length !== 1 ? 's' : ''}
-                      </div>
-                    </div>
-                  </button>
-                  
-                  {/* Connector Line */}
-                  <div className={`flex-1 h-0.5 mx-2 transition-colors ${
-                    preprocessingPhase === 'outliers' || preprocessingPhase === 'processing' || results
-                      ? 'bg-primary'
-                      : 'bg-muted'
+                <button
+                  onClick={() => {
+                    if (!preprocessing && !results && preprocessingPhase !== 'idle' && preprocessingPhase !== 'target') {
+                      setPreprocessingPhase('rare-values');
+                      setShowTargetSelection(false);
+                    }
+                  }}
+                  disabled={preprocessing || results || preprocessingPhase === 'idle' || preprocessingPhase === 'target'}
+                  className={`flex items-center gap-2.5 shrink-0 ${
+                    preprocessing || results || preprocessingPhase === 'idle' || preprocessingPhase === 'target'
+                      ? 'cursor-not-allowed opacity-50'
+                      : 'cursor-pointer'
+                  }`}
+                >
+                  <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${
+                    preprocessingPhase === 'rare-values'
+                      ? 'bg-foreground ring-[3px] ring-foreground/20'
+                      : (preprocessingPhase === 'outliers' || preprocessingPhase === 'processing' || results)
+                      ? 'bg-foreground/50'
+                      : 'bg-muted-foreground/40'
                   }`} />
-                </div>
+                  <div className="text-left">
+                    <div className={`text-sm font-medium leading-tight ${
+                      preprocessingPhase === 'rare-values'
+                        ? 'text-foreground'
+                        : 'text-muted-foreground'
+                    }`}>
+                      Rare Values
+                    </div>
+                    <div className="text-[11px] text-muted-foreground leading-tight">
+                      {rareValueColumns.length} column{rareValueColumns.length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                </button>
+                  
+                {/* Connector Line */}
+                <div className={`flex-1 h-px mx-4 transition-colors ${
+                  preprocessingPhase === 'outliers' || preprocessingPhase === 'processing' || results
+                    ? 'bg-foreground/30'
+                    : 'bg-border'
+                }`} />
               </>
             )}
 
             {/* Step 3: Outliers (conditional) */}
             {outlierData && Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length > 0 && (
               <>
-                <div className="flex items-center gap-3 flex-1">
-                  <button
-                    onClick={() => {
-                      if (!preprocessing && !results && preprocessingPhase !== 'idle' && preprocessingPhase !== 'target' && preprocessingPhase !== 'rare-values') {
-                        setPreprocessingPhase('outliers');
-                        setShowTargetSelection(false);
-                      }
-                    }}
-                    disabled={preprocessing || results || preprocessingPhase === 'idle' || preprocessingPhase === 'target' || preprocessingPhase === 'rare-values'}
-                    className={`flex items-center gap-3 transition-all ${
-                      preprocessing || results || preprocessingPhase === 'idle' || preprocessingPhase === 'target' || preprocessingPhase === 'rare-values'
-                        ? 'cursor-not-allowed opacity-50'
-                        : 'cursor-pointer hover:scale-105'
-                    }`}
-                  >
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all ${
-                      preprocessingPhase === 'outliers'
-                        ? 'bg-primary text-primary-foreground shadow-lg'
-                        : (preprocessingPhase === 'processing' || results)
-                        ? 'bg-primary/50 text-primary-foreground'
-                        : 'bg-muted text-muted-foreground'
-                    }`}>
-                      {rareValueColumns.length > 0 ? '3' : '2'}
-                    </div>
-                    <div className="text-left">
-                      <div className={`font-semibold text-sm ${
-                        preprocessingPhase === 'outliers'
-                          ? 'text-foreground'
-                          : 'text-muted-foreground'
-                      }`}>
-                        Outliers
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length} column{Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length !== 1 ? 's' : ''}
-                      </div>
-                    </div>
-                  </button>
-                  
-                  {/* Connector Line */}
-                  <div className={`flex-1 h-0.5 mx-2 transition-colors ${
-                    preprocessingPhase === 'processing' || results
-                      ? 'bg-primary'
-                      : 'bg-muted'
+                <button
+                  onClick={() => {
+                    if (!preprocessing && !results && preprocessingPhase !== 'idle' && preprocessingPhase !== 'target' && preprocessingPhase !== 'rare-values') {
+                      setPreprocessingPhase('outliers');
+                      setShowTargetSelection(false);
+                    }
+                  }}
+                  disabled={preprocessing || results || preprocessingPhase === 'idle' || preprocessingPhase === 'target' || preprocessingPhase === 'rare-values'}
+                  className={`flex items-center gap-2.5 shrink-0 ${
+                    preprocessing || results || preprocessingPhase === 'idle' || preprocessingPhase === 'target' || preprocessingPhase === 'rare-values'
+                      ? 'cursor-not-allowed opacity-50'
+                      : 'cursor-pointer'
+                  }`}
+                >
+                  <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${
+                    preprocessingPhase === 'outliers'
+                      ? 'bg-foreground ring-[3px] ring-foreground/20'
+                      : (preprocessingPhase === 'processing' || results)
+                      ? 'bg-foreground/50'
+                      : 'bg-muted-foreground/40'
                   }`} />
-                </div>
+                  <div className="text-left">
+                    <div className={`text-sm font-medium leading-tight ${
+                      preprocessingPhase === 'outliers'
+                        ? 'text-foreground'
+                        : 'text-muted-foreground'
+                    }`}>
+                      Outliers
+                    </div>
+                    <div className="text-[11px] text-muted-foreground leading-tight">
+                      {Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length} column{Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                </button>
+                  
+                {/* Connector Line */}
+                <div className={`flex-1 h-px mx-4 transition-colors ${
+                  preprocessingPhase === 'processing' || results
+                    ? 'bg-foreground/30'
+                    : 'bg-border'
+                }`} />
               </>
             )}
 
             {/* Final Step: Processing */}
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all ${
+            <div className={`flex items-center gap-2.5 shrink-0 ${preprocessing ? 'animate-pulse' : ''}`}>
+              <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${
                 preprocessingPhase === 'processing' || results
-                  ? 'bg-primary text-primary-foreground shadow-lg'
-                  : 'bg-muted text-muted-foreground'
-              } ${preprocessing ? 'animate-pulse' : ''}`}>
-                {rareValueColumns.length > 0 && outlierData && Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length > 0
-                  ? '4'
-                  : rareValueColumns.length > 0 || (outlierData && Object.keys(outlierData?.outliers_by_column || {}).filter(col => outlierData.outliers_by_column[col].count > 0).length > 0)
-                  ? '3'
-                  : '2'}
-              </div>
+                  ? 'bg-foreground ring-[3px] ring-foreground/20'
+                  : 'bg-muted-foreground/40'
+              }`} />
               <div className="text-left">
-                <div className={`font-semibold text-sm ${
+                <div className={`text-sm font-medium leading-tight ${
                   preprocessingPhase === 'processing' || results
                     ? 'text-foreground'
                     : 'text-muted-foreground'
                 }`}>
                   Processing
                 </div>
-                <div className="text-xs text-muted-foreground">
+                <div className="text-[11px] text-muted-foreground leading-tight">
                   {preprocessing ? 'Running...' : results ? 'Complete' : 'Ready'}
                 </div>
               </div>

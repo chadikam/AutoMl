@@ -3,6 +3,7 @@ Dataset routes for uploading, analyzing, and managing datasets
 """
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, Body, Request
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from typing import List, Optional
 import pandas as pd
 import numpy as np
@@ -54,7 +55,7 @@ MISSING_VALUE_INDICATORS = [
     
     # Numeric representations
     '-999', '-9999', '999', '9999',  # Common sentinel values
-    '-1', '0' if False else None,  # Sometimes 0 or -1 indicate missing (but be careful!)
+    '-1',  # Sometimes -1 indicates missing (be careful with legitimate -1 values)
     
     # Special characters
     '*', '**', '#N/A', '#NA',
@@ -70,74 +71,16 @@ MISSING_VALUE_INDICATORS = [
 
 def normalize_data_formats(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Normalize data formats for proper type detection WITHOUT modifying structure:
+    Normalize data formats for proper type detection WITHOUT modifying structure.
+    
+    Delegates to clean_and_parse_data() which handles:
     1. European number formats (comma → dot): 2,6 → 2.6
     2. Time formats (dots → colons): 18.00.00 → 18:00:00
     3. Parse datetime columns properly
     
     NOTE: Does NOT add or remove columns - only normalizes existing data
-    
-    Args:
-        df: Raw DataFrame
-    
-    Returns:
-        DataFrame with normalized formats (same columns)
     """
-    print(f"\n🔧 Normalizing data formats (no structural changes)...")
-    print(f"   Shape: {df.shape}")
-    
-    # 1. Handle European number formats (comma as decimal separator)
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            # Sample first 100 non-null values
-            sample = df[col].dropna().head(100)
-            if len(sample) > 0:
-                # Check if values look like European decimals (e.g., "2,6" "13,3")
-                european_decimal_pattern = sample.astype(str).str.match(r'^-?\d+,\d+$')
-                if european_decimal_pattern.sum() > len(sample) * 0.5:
-                    print(f"   Converting European decimals in '{col}': '2,6' → 2.6")
-                    # Replace comma with dot and convert to float
-                    df[col] = df[col].astype(str).str.replace(',', '.').replace('nan', np.nan)
-                    try:
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                    except:
-                        pass
-    
-    # 2. Normalize datetime formats and parse
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            sample = df[col].dropna().head(100)
-            if len(sample) == 0:
-                continue
-                
-            sample_str = sample.astype(str)
-            
-            # Check for time format with dots (18.00.00)
-            time_dot_pattern = sample_str.str.match(r'^\d{1,2}\.\d{2}\.\d{2}')
-            if time_dot_pattern.sum() > len(sample) * 0.5:
-                print(f"   Normalizing time format in '{col}': 18.00.00 → 18:00:00")
-                df[col] = df[col].astype(str).str.replace('.', ':', regex=False)
-            
-            # Try to parse as datetime with multiple strategies
-            try:
-                # First try: Let pandas infer
-                parsed = pd.to_datetime(df[col], errors='coerce')
-                if parsed.notna().sum() > len(df) * 0.5:
-                    df[col] = parsed
-                    print(f"   ✓ Parsed '{col}' as datetime")
-                    continue
-                
-                # Second try: Day first (European format DD/MM/YYYY)
-                parsed = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
-                if parsed.notna().sum() > len(df) * 0.5:
-                    df[col] = parsed
-                    print(f"   ✓ Parsed '{col}' as datetime (dayfirst)")
-                    continue
-            except:
-                pass
-    
-    print(f"   Final dtypes: {df.dtypes.value_counts().to_dict()}\n")
-    return df
+    return clean_and_parse_data(df)
 
 
 def clean_and_parse_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -383,11 +326,32 @@ def detect_header(file_path: str, delimiter: str, encoding: str = 'utf-8') -> bo
         # Check if first row values appear in subsequent rows (sign of no header)
         first_row_values = set(val.strip().lower() for val in first_row if val.strip())
         
-        # Check if any first row value appears in subsequent rows
+        # Heuristic 1: Check if first row contains any numeric values
+        # Headers are typically non-numeric strings
+        numeric_count = 0
+        for val in first_row:
+            val_stripped = val.strip()
+            try:
+                float(val_stripped)
+                numeric_count += 1
+            except (ValueError, TypeError):
+                pass
+        
+        # If majority of first row is numeric, it's likely data, not a header
+        if numeric_count > len(first_row) * 0.5:
+            return False
+        
+        # Heuristic 2: Check if first row has significantly different data types than subsequent rows
+        # (e.g., first row all strings, subsequent rows have numbers)
+        # Only flag as no-header if first row values DIRECTLY repeat in data (exact cell match, not set intersection)
         for line in lines[1:]:
-            row_values = set(val.strip().lower() for val in line.split(delimiter) if val.strip())
-            # If first row values appear in data rows, it's likely a data row itself
-            if first_row_values & row_values:  # Intersection
+            row_values = [val.strip().lower() for val in line.split(delimiter)]
+            # Check if exact same values appear (column by column)
+            exact_matches = sum(1 for a, b in zip(
+                [v.strip().lower() for v in first_row], row_values
+            ) if a == b)
+            # If >50% of cells match exactly, first row is probably data
+            if exact_matches > len(first_row) * 0.5:
                 return False
         
         # Check if first row looks like typical categorical data (ham/spam, yes/no, etc.)
@@ -454,13 +418,9 @@ def read_csv_smart(file_path: str, encoding: str = 'utf-8', **kwargs) -> pd.Data
     
     # If no header, generate column names
     if not has_header:
-        # Generate default column names
+        # Generate generic column names for all cases
         num_cols = len(df.columns)
-        if num_cols == 2:
-            # Common pattern: label and text/message
-            df.columns = ['label', 'message']
-        else:
-            df.columns = [f'Column{i+1}' for i in range(num_cols)]
+        df.columns = [f'Column{i+1}' for i in range(num_cols)]
         
         logger.info(f"No header detected. Generated column names: {list(df.columns)}")
     
@@ -1643,13 +1603,18 @@ async def download_dataset(
     from urllib.parse import quote
     encoded_filename = quote(filename)
     
+    # Determine if this temp file needs cleanup after sending
+    is_temp_file = file_path != dataset.get('file_path', '')
+    background = BackgroundTask(lambda p=file_path: os.unlink(p)) if is_temp_file else None
+    
     return FileResponse(
         path=file_path,
         filename=filename,
         media_type="text/csv",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
-        }
+        },
+        background=background
     )
 
 
@@ -1752,7 +1717,8 @@ async def download_train_test_split(
         media_type="text/csv",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
-        }
+        },
+        background=BackgroundTask(lambda p=temp_file.name: os.unlink(p))
     )
 
 

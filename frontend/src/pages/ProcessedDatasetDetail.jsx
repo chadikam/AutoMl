@@ -691,33 +691,33 @@ const ProcessedDatasetDetail = () => {
                       const isExpanded = expandedChange === key;
 
                       return (
-                        <div key={key}>
-                          <ClickableStatCard
-                            icon={icon}
-                            label={key.replace(/_/g, ' ')}
-                            value={displayValue.toLocaleString()}
-                            subtitle={getChangeSubtitle(key)}
-                            color={color}
-                            hasDetails={hasDetails}
-                            onClick={() => setExpandedChange(isExpanded ? null : key)}
-                            isExpanded={isExpanded}
-                          />
-                        </div>
+                        <React.Fragment key={key}>
+                          <div>
+                            <ClickableStatCard
+                              icon={icon}
+                              label={key.replace(/_/g, ' ')}
+                              value={displayValue.toLocaleString()}
+                              subtitle={getChangeSubtitle(key)}
+                              color={color}
+                              hasDetails={hasDetails}
+                              onClick={() => setExpandedChange(isExpanded ? null : key)}
+                              isExpanded={isExpanded}
+                            />
+                          </div>
+                          {isExpanded && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="col-span-1 md:col-span-2 lg:col-span-3"
+                            >
+                              {renderChangeDetails(key, dataset.preprocessing_summary)}
+                            </motion.div>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                 </div>
-
-                {/* Expanded Details */}
-                {expandedChange && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mt-4"
-                  >
-                    {renderChangeDetails(expandedChange, dataset.preprocessing_summary)}
-                  </motion.div>
-                )}
               </div>
             )}
 

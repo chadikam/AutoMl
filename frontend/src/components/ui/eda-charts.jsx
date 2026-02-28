@@ -66,7 +66,8 @@ const OutlierBellCurveVisualization = ({ outliersData }) => {
   // Filter columns that have outliers
   const columnsWithOutliers = Object.entries(outliersData || {})
     .filter(([_, data]) => data.count > 0)
-    .map(([name, data]) => ({ name, ...data }));
+    .map(([name, data]) => ({ name, ...data }))
+    .sort((a, b) => b.count - a.count);
   
   if (columnsWithOutliers.length === 0) {
     return (
@@ -687,10 +688,10 @@ const EDACharts = ({ edaResults, className }) => {
             <CardContent>
               <ResponsiveContainer width="100%" height={250}>
                 <RadarChart data={qualityData}>
-                  <PolarGrid className="stroke-muted" />
+                  <PolarGrid stroke="currentColor" strokeOpacity={0.15} />
                   <PolarAngleAxis dataKey="metric" tick={{ fill: 'currentColor' }} className="text-xs fill-foreground" />
                   <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fill: 'currentColor' }} className="text-xs fill-foreground" />
-                  <Radar name="Score" dataKey="value" stroke={COLORS[0]} fill={COLORS[0]} fillOpacity={0.3} isAnimationActive={false} />
+                  <Radar name="Score" dataKey="value" stroke={COLORS[0]} fill={COLORS[0]} fillOpacity={0.3} isAnimationActive={false} dot={false} />
                   <Tooltip content={<CustomTooltip />} />
                 </RadarChart>
               </ResponsiveContainer>

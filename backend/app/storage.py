@@ -7,6 +7,7 @@ import json
 import os
 import uuid
 import asyncio
+import threading
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -116,6 +117,7 @@ class JsonStore:
         self.name = name
         self.file_path = DATA_DIR / f"{name}.json"
         self._lock = asyncio.Lock()
+        self._file_lock = threading.Lock()  # Protects concurrent file reads/writes
         self._ensure_file()
     
     def _ensure_file(self):
@@ -126,24 +128,33 @@ class JsonStore:
                 json.dump([], f)
     
     def _read_sync(self) -> List[Dict]:
-        """Read all documents from JSON file (synchronous)"""
+        """Read all documents from JSON file (synchronous, thread-safe)"""
         try:
-            with open(self.file_path, 'r') as f:
-                docs = json.load(f)
-                return [_parse_dates(doc) for doc in docs]
+            with self._file_lock:
+                with open(self.file_path, 'r') as f:
+                    docs = json.load(f)
+            return [_parse_dates(doc) for doc in docs]
         except (json.JSONDecodeError, FileNotFoundError):
             return []
     
     def _write_sync(self, docs: List[Dict]):
-        """Write all documents to JSON file (synchronous)"""
-        with open(self.file_path, 'w') as f:
-            json.dump(docs, f, indent=2, default=_json_serializer)
+        """Write all documents to JSON file (synchronous, thread-safe)"""
+        with self._file_lock:
+            with open(self.file_path, 'w') as f:
+                json.dump(docs, f, indent=2, default=_json_serializer)
     
     def _matches(self, doc: Dict, query: Dict) -> bool:
         """Check if a document matches a query filter"""
         for key, value in query.items():
+            # Handle $or operator
+            if key == '$or':
+                if isinstance(value, list) and value:
+                    if not any(self._matches(doc, sub_q) for sub_q in value):
+                        return False
+                continue
+            
             if key.startswith('$'):
-                continue  # Skip operators at top level
+                continue  # Skip other unsupported operators at top level
             
             # Handle $exists operator
             if isinstance(value, dict) and "$exists" in value:
@@ -177,7 +188,6 @@ class JsonStore:
         docs = self._read_sync()
         if query:
             matched_docs = [doc for doc in docs if self._matches(doc, query)]
-            return JsonCursor(matched_docs)
             return JsonCursor(matched_docs)
         return JsonCursor(docs)
     

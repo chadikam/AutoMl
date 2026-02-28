@@ -149,19 +149,19 @@ class OutlierCapper(BaseEstimator, TransformerMixin):
     
     def fit(self, X, y=None):
         """Calculate bounds for each column"""
-        print(f"\n🔍 OutlierCapper.fit() called:")
-        print(f"   Input type: {type(X)}")
-        print(f"   Input shape: {X.shape if hasattr(X, 'shape') else 'N/A'}")
+        logger.debug(f"\n🔍 OutlierCapper.fit() called:")
+        logger.debug(f"   Input type: {type(X)}")
+        logger.debug(f"   Input shape: {X.shape if hasattr(X, 'shape') else 'N/A'}")
         if isinstance(X, pd.DataFrame):
-            print(f"   Columns: {X.columns.tolist()}")
+            logger.debug(f"   Columns: {X.columns.tolist()}")
             X_array = X.values
             columns = X.columns
         else:
             X_array = X
             columns = [f"col_{i}" for i in range(X.shape[1])]
         
-        print(f"   X_array shape: {X_array.shape}")
-        print(f"   Sample data (first row): {X_array[0] if len(X_array) > 0 else 'N/A'}")
+        logger.debug(f"   X_array shape: {X_array.shape}")
+        logger.debug(f"   Sample data (first row): {X_array[0] if len(X_array) > 0 else 'N/A'}")
         
         self.lower_bounds_ = []
         self.upper_bounds_ = []
@@ -198,19 +198,19 @@ class OutlierCapper(BaseEstimator, TransformerMixin):
     
     def transform(self, X):
         """Cap outliers to bounds"""
-        print(f"\n🔍 OutlierCapper.transform() called:")
-        print(f"   Input type: {type(X)}")
-        print(f"   Input shape: {X.shape if hasattr(X, 'shape') else 'N/A'}")
+        logger.debug(f"\n🔍 OutlierCapper.transform() called:")
+        logger.debug(f"   Input type: {type(X)}")
+        logger.debug(f"   Input shape: {X.shape if hasattr(X, 'shape') else 'N/A'}")
         
         if isinstance(X, pd.DataFrame):
-            print(f"   Columns: {X.columns.tolist()}")
+            logger.debug(f"   Columns: {X.columns.tolist()}")
             X_array = X.values.copy()
         else:
             X_array = X.copy()
         
-        print(f"   X_array shape before clipping: {X_array.shape}")
-        print(f"   Sample data (first row): {X_array[0] if len(X_array) > 0 else 'N/A'}")
-        print(f"   Bounds: lower={self.lower_bounds_[:3]}, upper={self.upper_bounds_[:3]}")
+        logger.debug(f"   X_array shape before clipping: {X_array.shape}")
+        logger.debug(f"   Sample data (first row): {X_array[0] if len(X_array) > 0 else 'N/A'}")
+        logger.debug(f"   Bounds: lower={self.lower_bounds_[:3]}, upper={self.upper_bounds_[:3]}")
         
         for i in range(X_array.shape[1]):
             col = X_array[:, i]
@@ -220,8 +220,8 @@ class OutlierCapper(BaseEstimator, TransformerMixin):
             col_clipped[nan_mask] = np.nan
             X_array[:, i] = col_clipped
         
-        print(f"   Output shape: {X_array.shape}")
-        print(f"   Sample output (first row): {X_array[0] if len(X_array) > 0 else 'N/A'}")
+        logger.debug(f"   Output shape: {X_array.shape}")
+        logger.debug(f"   Sample output (first row): {X_array[0] if len(X_array) > 0 else 'N/A'}")
         
         return X_array
 
@@ -270,9 +270,9 @@ class TextVectorizer(BaseEstimator, TransformerMixin):
                 feature_names = [f"{col}_tfidf_{i}" for i in range(len(vectorizer.get_feature_names_out()))]
                 self.feature_names_.extend(feature_names)
                 
-                print(f"   ✓ TF-IDF fitted for '{col}': {len(feature_names)} features")
+                logger.debug(f"   ✓ TF-IDF fitted for '{col}': {len(feature_names)} features")
             except Exception as e:
-                print(f"   ⚠️ Warning: Could not vectorize '{col}': {str(e)}")
+                logger.debug(f"   ⚠️ Warning: Could not vectorize '{col}': {str(e)}")
         
         return self
     
@@ -454,8 +454,8 @@ class AdaptivePreprocessor:
                 f"Target column '{target_column}' not found in dataset. Available columns: {df.columns.tolist()[:10]}...",
                 "warning"
             )
-            print(f"⚠️ WARNING: Target column '{target_column}' not in DataFrame!")
-            print(f"   Available columns ({len(df.columns)}): {df.columns.tolist()}")
+            logger.debug(f"⚠️ WARNING: Target column '{target_column}' not in DataFrame!")
+            logger.debug(f"   Available columns ({len(df.columns)}): {df.columns.tolist()}")
             return TaskType.UNSUPERVISED
         
         target_data = df[target_column].dropna()
@@ -477,11 +477,11 @@ class AdaptivePreprocessor:
         if pd.api.types.is_numeric_dtype(target_data):
             # If unique values / total > 0.05, likely regression
             unique_ratio = unique_count / total_count
-            print(f"🔍 TASK DETECTION: Target '{target_column}'")
-            print(f"   dtype: {target_data.dtype}")
-            print(f"   unique_count: {unique_count}")
-            print(f"   total_count: {total_count}")
-            print(f"   unique_ratio: {unique_ratio:.4f} (threshold: 0.05)")
+            logger.debug(f"🔍 TASK DETECTION: Target '{target_column}'")
+            logger.debug(f"   dtype: {target_data.dtype}")
+            logger.debug(f"   unique_count: {unique_count}")
+            logger.debug(f"   total_count: {total_count}")
+            logger.debug(f"   unique_ratio: {unique_ratio:.4f} (threshold: 0.05)")
             
             if unique_ratio > 0.05:
                 self.task_type = TaskType.REGRESSION
@@ -579,7 +579,7 @@ class AdaptivePreprocessor:
         """
         self._log_decision("column_analysis", "Starting column analysis", "Detecting problematic columns", "info")
         
-        print(f"\n🔍 COLUMN ANALYSIS START - Total columns: {len(df.columns)}")
+        logger.debug(f"\n🔍 COLUMN ANALYSIS START - Total columns: {len(df.columns)}")
         
         columns_to_drop = []
         
@@ -742,16 +742,16 @@ class AdaptivePreprocessor:
         else:
             remaining_features = remaining_columns
         
-        print(f"🔍 Safety check:")
-        print(f"   Total columns: {len(df.columns)} - {df.columns.tolist()}")
-        print(f"   Target column: {target_column}")
-        print(f"   Marked for removal: {len(columns_to_drop)} - {columns_to_drop}")
-        print(f"   Remaining after removal: {len(remaining_columns)} - {remaining_columns}")
-        print(f"   Remaining features (excluding target): {len(remaining_features)} - {remaining_features}")
+        logger.debug(f"🔍 Safety check:")
+        logger.debug(f"   Total columns: {len(df.columns)} - {df.columns.tolist()}")
+        logger.debug(f"   Target column: {target_column}")
+        logger.debug(f"   Marked for removal: {len(columns_to_drop)} - {columns_to_drop}")
+        logger.debug(f"   Remaining after removal: {len(remaining_columns)} - {remaining_columns}")
+        logger.debug(f"   Remaining features (excluding target): {len(remaining_features)} - {remaining_features}")
         
         # If we would remove all features, don't remove ANY columns
         if len(remaining_features) == 0:
-            print(f"⚠️ SAFETY TRIGGERED: Would remove all features!")
+            logger.debug(f"⚠️ SAFETY TRIGGERED: Would remove all features!")
             self._log_decision(
                 "column_removal",
                 "Safety: Keeping all columns",
@@ -766,7 +766,7 @@ class AdaptivePreprocessor:
             self.high_missing_columns = []
         # If we would have very few features left (< 2), be less aggressive
         elif len(remaining_features) < 2:
-            print(f"⚠️ SAFETY TRIGGERED: Only {len(remaining_features)} feature(s) would remain!")
+            logger.debug(f"⚠️ SAFETY TRIGGERED: Only {len(remaining_features)} feature(s) would remain!")
             self._log_decision(
                 "column_removal",
                 "Safety: Keeping more columns",
@@ -981,6 +981,62 @@ class AdaptivePreprocessor:
             
             return df
     
+    def _identify_outlier_rows(self, df: pd.DataFrame, target_column: Optional[str] = None) -> set:
+        """
+        Identify outlier row indices WITHOUT removing them.
+        Used for deferred removal after train/test split (applied to training set only).
+        
+        Args:
+            df: Input DataFrame
+            target_column: Target column to exclude from outlier detection
+        
+        Returns:
+            Set of row indices that contain outliers
+        """
+        rows_to_remove = set()
+        
+        numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        if target_column and target_column in numerical_cols:
+            numerical_cols = [col for col in numerical_cols if col != target_column]
+        
+        outlier_details_for_identification = []
+        
+        for col in numerical_cols:
+            preference = self.outlier_preferences.get(col, 'keep')
+            
+            if preference == 'remove':
+                col_data = df[col].dropna()
+                if len(col_data) > 0:
+                    Q1 = col_data.quantile(0.25)
+                    Q3 = col_data.quantile(0.75)
+                    IQR = Q3 - Q1
+                    
+                    if IQR < 1e-10:
+                        mean = col_data.mean()
+                        std = col_data.std()
+                        lower_bound = mean - 3 * std
+                        upper_bound = mean + 3 * std
+                    else:
+                        lower_bound = Q1 - 2.5 * IQR
+                        upper_bound = Q3 + 2.5 * IQR
+                    
+                    outlier_mask = (df[col] < lower_bound) | (df[col] > upper_bound)
+                    outlier_indices = df[outlier_mask].index.tolist()
+                    
+                    if outlier_indices:
+                        rows_to_remove.update(outlier_indices)
+                        outlier_details_for_identification.append({
+                            'column': col,
+                            'count': len(outlier_indices),
+                            'percentage': (len(outlier_indices) / len(df) * 100) if len(df) > 0 else 0,
+                            'lower_bound': float(lower_bound),
+                            'upper_bound': float(upper_bound),
+                            'action': 'deferred_removal'
+                        })
+        
+        self.outlier_details.extend(outlier_details_for_identification)
+        return rows_to_remove
+    
     def _is_id_column(self, df: pd.DataFrame, col: str) -> bool:
         """Check if column is an ID column - requires multiple indicators"""
         # Skip datetime columns - they may be highly unique but are not IDs
@@ -1124,16 +1180,16 @@ class AdaptivePreprocessor:
         
         feature_cols = [col for col in df.columns if col != target_column]
         
-        print(f"\n🔍 CATEGORIZE_FEATURES DEBUG:")
-        print(f"   feature_cols ({len(feature_cols)}): {feature_cols}")
-        print(f"   target_column: '{target_column}'")
+        logger.debug(f"\n🔍 CATEGORIZE_FEATURES DEBUG:")
+        logger.debug(f"   feature_cols ({len(feature_cols)}): {feature_cols}")
+        logger.debug(f"   target_column: '{target_column}'")
         
         # Store existing datetime-extracted features before resetting
         existing_numerical = self.numerical_features.copy()
         existing_categorical = self.categorical_features.copy()
         
-        print(f"   existing_numerical: {existing_numerical}")
-        print(f"   existing_categorical: {existing_categorical}")
+        logger.debug(f"   existing_numerical: {existing_numerical}")
+        logger.debug(f"   existing_categorical: {existing_categorical}")
         
         # Reset lists to rebuild them
         self.numerical_features = []
@@ -1144,22 +1200,22 @@ class AdaptivePreprocessor:
             # Skip if this column was already categorized (e.g., datetime-extracted features)
             if col in existing_numerical:
                 self.numerical_features.append(col)
-                print(f"   ✓ '{col}' -> numerical (from existing)")
+                logger.debug(f"   ✓ '{col}' -> numerical (from existing)")
                 continue
             elif col in existing_categorical:
                 self.categorical_features.append(col)
-                print(f"   ✓ '{col}' -> categorical (from existing)")
+                logger.debug(f"   ✓ '{col}' -> categorical (from existing)")
                 continue
             
             # Datetime detection
             if pd.api.types.is_datetime64_any_dtype(df[col]):
                 self.datetime_features.append(col)
-                print(f"   ✓ '{col}' -> datetime (dtype detection)")
+                logger.debug(f"   ✓ '{col}' -> datetime (dtype detection)")
             # Numerical
             elif pd.api.types.is_numeric_dtype(df[col]):
                 # All numerical columns stay numerical (including binary 0/1)
                 self.numerical_features.append(col)
-                print(f"   ✓ '{col}' -> numerical (dtype: {df[col].dtype})")
+                logger.debug(f"   ✓ '{col}' -> numerical (dtype: {df[col].dtype})")
             # Categorical
             else:
                 # Try datetime parsing
@@ -1174,7 +1230,7 @@ class AdaptivePreprocessor:
                 
                 if is_datetime:
                     self.datetime_features.append(col)
-                    print(f"   ✓ '{col}' -> datetime (parsing)")
+                    logger.debug(f"   ✓ '{col}' -> datetime (parsing)")
                 else:
                     # Check if this is a text column (long strings, not categorical)
                     # TODO: Re-enable in v2 after full validation
@@ -1201,18 +1257,18 @@ class AdaptivePreprocessor:
                                (avg_length > 50 and (has_spaces or has_punctuation)):
                                 is_text = True
                                 self.text_features.append(col)
-                                print(f"   ✓ '{col}' -> TEXT (avg_len={avg_length:.0f}, unique={unique_count}, ratio={unique_ratio:.2f})")
-                                print(f"      Will apply TF-IDF vectorization with {5000} features")
+                                logger.debug(f"   ✓ '{col}' -> TEXT (avg_len={avg_length:.0f}, unique={unique_count}, ratio={unique_ratio:.2f})")
+                                logger.debug(f"      Will apply TF-IDF vectorization with {5000} features")
                     
                     if not is_text:
                         self.categorical_features.append(col)
-                        print(f"   ✓ '{col}' -> categorical (dtype: {df[col].dtype})")
+                        logger.debug(f"   ✓ '{col}' -> categorical (dtype: {df[col].dtype})")
         
-        print(f"\n   FINAL RESULT:")
-        print(f"   numerical_features: {self.numerical_features}")
-        print(f"   categorical_features: {self.categorical_features}")
-        print(f"   text_features: {self.text_features}")
-        print(f"   datetime_features: {self.datetime_features}\n")
+        logger.debug(f"\n   FINAL RESULT:")
+        logger.debug(f"   numerical_features: {self.numerical_features}")
+        logger.debug(f"   categorical_features: {self.categorical_features}")
+        logger.debug(f"   text_features: {self.text_features}")
+        logger.debug(f"   datetime_features: {self.datetime_features}\n")
         
         # Build feature summary message
         feature_summary_parts = []
@@ -1335,7 +1391,7 @@ class AdaptivePreprocessor:
             if col not in df.columns:
                 continue
             
-            print(f"   🔍 Checking datetime column '{col}' - target_column='{target_column}' - match={col == target_column}")
+            logger.debug(f"   🔍 Checking datetime column '{col}' - target_column='{target_column}' - match={col == target_column}")
             
             # Skip target column - keep it as-is for prediction
             if col == target_column:
@@ -2500,11 +2556,11 @@ class AdaptivePreprocessor:
         # Categorize features
         self.categorize_features(df, target_column)
         
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: After categorize_features in create_preprocessing_pipeline")
-        print(f"   Numerical features: {self.numerical_features}")
-        print(f"   Categorical features: {self.categorical_features}")
-        print(f"{'='*80}\n")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: After categorize_features in create_preprocessing_pipeline")
+        logger.debug(f"   Numerical features: {self.numerical_features}")
+        logger.debug(f"   Categorical features: {self.categorical_features}")
+        logger.debug(f"{'='*80}\n")
         
         # Choose strategies
         scaling_strategy = self.choose_scaling_strategy()
@@ -2907,7 +2963,7 @@ class AdaptivePreprocessor:
         # Text features (TF-IDF vectorization)
         # TODO: Re-enable in v2 after full validation
         if self.text_features and FeatureFlags.ENABLE_TEXT_PROCESSING:
-            print(f"\n📝 Creating text pipeline for {len(self.text_features)} text columns: {self.text_features}")
+            logger.debug(f"\n📝 Creating text pipeline for {len(self.text_features)} text columns: {self.text_features}")
             
             text_pipeline = Pipeline(steps=[
                 ('vectorizer', TextVectorizer(
@@ -2988,94 +3044,97 @@ class AdaptivePreprocessor:
         
         # Remove duplicate rows (must be done before splitting to maintain consistency)
         df_cleaned = self.detect_and_remove_duplicates(df_cleaned)
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: After detect_and_remove_duplicates")
-        print(f"   DataFrame shape: {df_cleaned.shape}")
-        print(f"   Columns: {df_cleaned.columns.tolist()}")
-        print(f"{'='*80}\n")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: After detect_and_remove_duplicates")
+        logger.debug(f"   DataFrame shape: {df_cleaned.shape}")
+        logger.debug(f"   Columns: {df_cleaned.columns.tolist()}")
+        logger.debug(f"{'='*80}\n")
         
         # Remove outlier rows if user requested (must be before splitting)
         df_cleaned = self.remove_outlier_rows(df_cleaned, target_column)
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: After remove_outlier_rows")
-        print(f"   DataFrame shape: {df_cleaned.shape}")
-        print(f"   Outlier rows removed: {self.outlier_rows_removed}")
-        print(f"{'='*80}\n")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: After remove_outlier_rows")
+        logger.debug(f"   DataFrame shape: {df_cleaned.shape}")
+        logger.debug(f"   Outlier rows removed: {self.outlier_rows_removed}")
+        logger.debug(f"{'='*80}\n")
         
         # Detect and parse datetime columns BEFORE feature categorization
         df_cleaned = self.detect_and_parse_datetime(df_cleaned)
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: After detect_and_parse_datetime")
-        print(f"   DataFrame shape: {df_cleaned.shape}")
-        print(f"   Datetime features detected: {self.datetime_features}")
-        print(f"   Datetime column dtypes: {df_cleaned[self.datetime_features].dtypes.to_dict() if self.datetime_features else 'None'}")
-        print(f"{'='*80}\n")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: After detect_and_parse_datetime")
+        logger.debug(f"   DataFrame shape: {df_cleaned.shape}")
+        logger.debug(f"   Datetime features detected: {self.datetime_features}")
+        logger.debug(f"   Datetime column dtypes: {df_cleaned[self.datetime_features].dtypes.to_dict() if self.datetime_features else 'None'}")
+        logger.debug(f"{'='*80}\n")
         
         # Extract datetime features based on model family
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: About to call extract_datetime_features")
-        print(f"   target_column parameter: '{target_column}'")
-        print(f"   DataFrame shape: {df_cleaned.shape}")
-        print(f"   Datetime features to process: {self.datetime_features}")
-        print(f"{'='*80}\n")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: About to call extract_datetime_features")
+        logger.debug(f"   target_column parameter: '{target_column}'")
+        logger.debug(f"   DataFrame shape: {df_cleaned.shape}")
+        logger.debug(f"   Datetime features to process: {self.datetime_features}")
+        logger.debug(f"{'='*80}\n")
         
         df_cleaned = self.extract_datetime_features(df_cleaned, target_column)
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: After extract_datetime_features")
-        print(f"   DataFrame shape: {df_cleaned.shape}")
-        print(f"   Columns: {df_cleaned.columns.tolist()}")
-        print(f"   New features created: {self.preprocessing_metadata.get('datetime_features', {}).get('features_created', [])}")
-        print(f"   Datetime columns dropped: {self.preprocessing_metadata.get('datetime_features', {}).get('columns_dropped', [])}")
-        print(f"   Numerical features: {self.numerical_features}")
-        print(f"   Categorical features: {self.categorical_features}")
-        print(f"{'='*80}\n")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: After extract_datetime_features")
+        logger.debug(f"   DataFrame shape: {df_cleaned.shape}")
+        logger.debug(f"   Columns: {df_cleaned.columns.tolist()}")
+        logger.debug(f"   New features created: {self.preprocessing_metadata.get('datetime_features', {}).get('features_created', [])}")
+        logger.debug(f"   Datetime columns dropped: {self.preprocessing_metadata.get('datetime_features', {}).get('columns_dropped', [])}")
+        logger.debug(f"   Numerical features: {self.numerical_features}")
+        logger.debug(f"   Categorical features: {self.categorical_features}")
+        logger.debug(f"{'='*80}\n")
         
         # Handle multicollinearity (must be before pipeline creation)
+        # NOTE: Correlation is computed on full data (slight leakage). At r>0.9 threshold,
+        # correlation coefficients are extremely stable and the same columns would be dropped
+        # whether computed on train-only or full data. This is a known minor limitation.
         correlated_pairs = self.detect_high_correlation(df_cleaned, threshold=0.9, target_column=target_column)
         if correlated_pairs:
-            print(f"\n{'='*80}")
-            print(f"🔍 DEBUG: Detected {len(correlated_pairs)} highly correlated feature pairs")
+            logger.debug(f"\n{'='*80}")
+            logger.debug(f"🔍 DEBUG: Detected {len(correlated_pairs)} highly correlated feature pairs")
             for pair in correlated_pairs[:5]:  # Show first 5
-                print(f"   {pair['feature1']} <-> {pair['feature2']}: r={pair['correlation']:.3f}, relationship={pair['semantic_relationship']}")
-            print(f"{'='*80}\n")
+                logger.debug(f"   {pair['feature1']} <-> {pair['feature2']}: r={pair['correlation']:.3f}, relationship={pair['semantic_relationship']}")
+            logger.debug(f"{'='*80}\n")
             
             df_cleaned = self.handle_multicollinearity(df_cleaned, correlated_pairs, target_column)
             
-            print(f"\n{'='*80}")
-            print(f"🔍 DEBUG: After handle_multicollinearity")
+            logger.debug(f"\n{'='*80}")
+            logger.debug(f"🔍 DEBUG: After handle_multicollinearity")
 
-            print(f"   Columns ({len(df_cleaned.columns)}): {df_cleaned.columns.tolist()}")
-            print(f"{'='*80}\n")
+            logger.debug(f"   Columns ({len(df_cleaned.columns)}): {df_cleaned.columns.tolist()}")
+            logger.debug(f"{'='*80}\n")
         
         # Create pipeline AFTER removing problematic columns (so it knows correct feature count)
         # NOTE: create_preprocessing_pipeline may identify additional columns to drop (high-missing categorical)
         self.create_preprocessing_pipeline(df_cleaned, target_column, model_type)
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: After create_preprocessing_pipeline")
-        print(f"   DataFrame shape: {df_cleaned.shape}")
-        print(f"   Columns ({len(df_cleaned.columns)}): {df_cleaned.columns.tolist()}")
-        print(f"   Numerical features: {self.numerical_features}")
-        print(f"   Categorical features: {self.categorical_features}")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: After create_preprocessing_pipeline")
+        logger.debug(f"   DataFrame shape: {df_cleaned.shape}")
+        logger.debug(f"   Columns ({len(df_cleaned.columns)}): {df_cleaned.columns.tolist()}")
+        logger.debug(f"   Numerical features: {self.numerical_features}")
+        logger.debug(f"   Categorical features: {self.categorical_features}")
         if self.pipeline and hasattr(self.pipeline, 'transformers'):
-            print(f"   Pipeline transformers: {[(name, type(trans).__name__, cols) for name, trans, cols in self.pipeline.transformers]}")
+            logger.debug(f"   Pipeline transformers: {[(name, type(trans).__name__, cols) for name, trans, cols in self.pipeline.transformers]}")
         else:
-            print(f"   Pipeline: {type(self.pipeline).__name__ if self.pipeline else 'None'}")
-        print(f"{'='*80}\n")
+            logger.debug(f"   Pipeline: {type(self.pipeline).__name__ if self.pipeline else 'None'}")
+        logger.debug(f"{'='*80}\n")
         
         # Drop any additional columns identified during pipeline creation (e.g., high-missing categorical)
         additional_drops = [col for col in self.dropped_columns if col in df_cleaned.columns]
         
         if additional_drops:
-            print(f"🧹 Dropping {len(additional_drops)} additional high-missing columns: {additional_drops}")
+            logger.debug(f"🧹 Dropping {len(additional_drops)} additional high-missing columns: {additional_drops}")
             df_cleaned = df_cleaned.drop(columns=additional_drops)
-            print(f"   DataFrame shape after additional drops: {df_cleaned.shape}")
-            print(f"   Columns ({len(df_cleaned.columns)}): {df_cleaned.columns.tolist()}")
+            logger.debug(f"   DataFrame shape after additional drops: {df_cleaned.shape}")
+            logger.debug(f"   Columns ({len(df_cleaned.columns)}): {df_cleaned.columns.tolist()}")
         
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: Before separating features and target")
-        print(f"   DataFrame shape: {df_cleaned.shape}")
-        print(f"   Target column: {target_column}")
-        print(f"{'='*80}\n")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: Before separating features and target")
+        logger.debug(f"   DataFrame shape: {df_cleaned.shape}")
+        logger.debug(f"   Target column: {target_column}")
+        logger.debug(f"{'='*80}\n")
         
         # Separate features and target
         if target_column and target_column in df_cleaned.columns:
@@ -3211,19 +3270,36 @@ class AdaptivePreprocessor:
                 "info"
             )
             
-            # Store original split sizes (before SMOTE)
+            # Store original split sizes (before SMOTE or outlier removal)
             original_train_size = len(X_train_raw)
             original_test_size = len(X_test_raw)
             
-            print(f"\n{'='*80}")
-            print(f"🔍 DEBUG: About to fit pipeline on TRAINING data")
-            print(f"   X_train_raw shape: {X_train_raw.shape}")
-            print(f"   X_train_raw columns ({X_train_raw.shape[1]}): {X_train_raw.columns.tolist()}")
+            # Apply DEFERRED outlier row removal to TRAINING SET ONLY
+            # This prevents data leakage: test set retains outlier rows for realistic evaluation
+            if hasattr(self, '_outlier_row_indices') and self._outlier_row_indices:
+                train_outlier_mask = X_train_raw.index.isin(self._outlier_row_indices)
+                outlier_count_train = int(train_outlier_mask.sum())
+                if outlier_count_train > 0:
+                    X_train_raw = X_train_raw[~train_outlier_mask].reset_index(drop=True)
+                    y_train = y_train[~train_outlier_mask.values]
+                    self.outlier_rows_removed = outlier_count_train
+                    self._log_decision(
+                        "outlier_removal",
+                        f"Removed {outlier_count_train} outlier rows from TRAINING set only",
+                        f"Test set retains outlier rows for realistic evaluation. Train: {original_train_size} → {len(X_train_raw)} rows",
+                        "warning"
+                    )
+                    original_train_size = len(X_train_raw)
+            
+            logger.debug(f"\n{'='*80}")
+            logger.debug(f"🔍 DEBUG: About to fit pipeline on TRAINING data")
+            logger.debug(f"   X_train_raw shape: {X_train_raw.shape}")
+            logger.debug(f"   X_train_raw columns ({X_train_raw.shape[1]}): {X_train_raw.columns.tolist()}")
 
 
 
 
-            print(f"{'='*80}\n")
+            logger.debug(f"{'='*80}\n")
             
             # Fit pipeline on TRAINING data only
             X_train = self.pipeline.fit_transform(X_train_raw)
@@ -3247,33 +3323,44 @@ class AdaptivePreprocessor:
             original_train_size = len(X)
             original_test_size = 0
             
-            print(f"\n{'='*80}")
-            print(f"🔍 DEBUG: About to fit pipeline on ALL data (unsupervised)")
-            print(f"   X shape: {X.shape}")
-            print(f"   X type: {type(X)}")
-            print(f"   X columns ({len(X.columns)}): {X.columns.tolist()}")
-            print(f"   Numerical features: {self.numerical_features}")
-            print(f"   Categorical features: {self.categorical_features}")
+            # Apply deferred outlier removal to full data (since there's no test set)
+            if hasattr(self, '_outlier_row_indices') and self._outlier_row_indices:
+                outlier_mask = X.index.isin(self._outlier_row_indices)
+                outlier_count = int(outlier_mask.sum())
+                if outlier_count > 0:
+                    X = X[~outlier_mask].reset_index(drop=True)
+                    if y is not None:
+                        y = y[~outlier_mask.values]
+                    self.outlier_rows_removed = outlier_count
+                    original_train_size = len(X)
+            
+            logger.debug(f"\n{'='*80}")
+            logger.debug(f"🔍 DEBUG: About to fit pipeline on ALL data (unsupervised)")
+            logger.debug(f"   X shape: {X.shape}")
+            logger.debug(f"   X type: {type(X)}")
+            logger.debug(f"   X columns ({len(X.columns)}): {X.columns.tolist()}")
+            logger.debug(f"   Numerical features: {self.numerical_features}")
+            logger.debug(f"   Categorical features: {self.categorical_features}")
             
             # Check if features exist in X
             missing_numerical = [f for f in self.numerical_features if f not in X.columns]
             missing_categorical = [f for f in self.categorical_features if f not in X.columns]
-            print(f"   Missing numerical features: {missing_numerical}")
-            print(f"   Missing categorical features: {missing_categorical}")
+            logger.debug(f"   Missing numerical features: {missing_numerical}")
+            logger.debug(f"   Missing categorical features: {missing_categorical}")
             
             # DEBUG: Check if outlier capper columns exist
             if hasattr(self, 'outlier_columns'):
-                print(f"   Outlier columns to cap: {self.outlier_columns}")
+                logger.debug(f"   Outlier columns to cap: {self.outlier_columns}")
                 outlier_missing = [f for f in self.outlier_columns if f not in X.columns]
-                print(f"   Missing outlier columns: {outlier_missing}")
+                logger.debug(f"   Missing outlier columns: {outlier_missing}")
             
             # DEBUG: Verify data types
-            print(f"   X dtypes:")
+            logger.debug(f"   X dtypes:")
             for col in X.columns[:5]:  # Show first 5
-                print(f"      {col}: {X[col].dtype}, sample: {X[col].iloc[0] if len(X) > 0 else 'N/A'}")
+                logger.debug(f"      {col}: {X[col].dtype}, sample: {X[col].iloc[0] if len(X) > 0 else 'N/A'}")
             
-            print(f"   Pipeline structure: {self.pipeline}")
-            print(f"{'='*80}\n")
+            logger.debug(f"   Pipeline structure: {self.pipeline}")
+            logger.debug(f"{'='*80}\n")
             
             X_train = self.pipeline.fit_transform(X)
             X_test, y_train, y_test = None, y, None
@@ -3415,21 +3502,21 @@ class AdaptivePreprocessor:
         """Extract feature names after transformation"""
         feature_names = []
         
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: _extract_feature_names")
-        print(f"   Pipeline type: {type(self.pipeline).__name__}")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: _extract_feature_names")
+        logger.debug(f"   Pipeline type: {type(self.pipeline).__name__}")
         
         # Check if pipeline has been fitted
         if not hasattr(self.pipeline, 'transformers_'):
-            print(f"   ⚠️  WARNING: Pipeline not fitted yet, using original transformers")
+            logger.debug(f"   ⚠️  WARNING: Pipeline not fitted yet, using original transformers")
             transformers_list = self.pipeline.transformers
         else:
-            print(f"   Number of transformers: {len(self.pipeline.transformers_)}")
+            logger.debug(f"   Number of transformers: {len(self.pipeline.transformers_)}")
             transformers_list = self.pipeline.transformers_
         
         for name, transformer, columns in transformers_list:
-            print(f"\n   Transformer: {name}")
-            print(f"   Columns passed to transformer ({len(columns)}): {columns}")
+            logger.debug(f"\n   Transformer: {name}")
+            logger.debug(f"   Columns passed to transformer ({len(columns)}): {columns}")
             
             if name == 'num':
                 # Check if numerical imputer adds indicator columns
@@ -3437,18 +3524,18 @@ class AdaptivePreprocessor:
                 actual_columns = list(columns)
                 
                 if imputer is not None and hasattr(imputer, 'indicator_') and imputer.indicator_ is not None:
-                    print(f"   Numerical imputer adds indicators: True")
-                    print(f"   Indicator features ({len(imputer.indicator_.features_)}): {imputer.indicator_.features_}")
+                    logger.debug(f"   Numerical imputer adds indicators: True")
+                    logger.debug(f"   Indicator features ({len(imputer.indicator_.features_)}): {imputer.indicator_.features_}")
                     # Add indicator column names for numerical features
                     for idx in imputer.indicator_.features_:
                         indicator_col_name = f"missingindicator_{columns[idx]}"
                         actual_columns.append(indicator_col_name)
-                    print(f"   Actual columns after imputation ({len(actual_columns)}): {actual_columns}")
+                    logger.debug(f"   Actual columns after imputation ({len(actual_columns)}): {actual_columns}")
                 else:
-                    print(f"   Numerical imputer adds indicators: False")
+                    logger.debug(f"   Numerical imputer adds indicators: False")
                 
                 feature_names.extend(actual_columns)
-                print(f"   ✓ Added {len(actual_columns)} numerical features")
+                logger.debug(f"   ✓ Added {len(actual_columns)} numerical features")
             elif name.startswith('cat'):
                 # Handle cat_ohe, cat_ord, and legacy 'cat' transformer names
                 encoder = transformer.named_steps['encoder']
@@ -3457,37 +3544,37 @@ class AdaptivePreprocessor:
                 # Get actual columns after imputation (including indicator columns)
                 actual_columns = list(columns)
                 if imputer is not None and hasattr(imputer, 'indicator_') and imputer.indicator_ is not None:
-                    print(f"   Imputer adds indicators: True")
-                    print(f"   Indicator features ({len(imputer.indicator_.features_)}): {imputer.indicator_.features_}")
+                    logger.debug(f"   Imputer adds indicators: True")
+                    logger.debug(f"   Indicator features ({len(imputer.indicator_.features_)}): {imputer.indicator_.features_}")
                     # Add indicator column names
                     for idx in imputer.indicator_.features_:
                         indicator_col_name = f"missingindicator_{columns[idx]}"
                         actual_columns.append(indicator_col_name)
-                    print(f"   Actual columns after imputation ({len(actual_columns)}): {actual_columns}")
+                    logger.debug(f"   Actual columns after imputation ({len(actual_columns)}): {actual_columns}")
                 else:
-                    print(f"   Imputer adds indicators: False")
+                    logger.debug(f"   Imputer adds indicators: False")
                 
                 if isinstance(encoder, OneHotEncoder):
                     # OneHotEncoder creates multiple columns per feature
                     cat_features = encoder.get_feature_names_out(actual_columns)
                     feature_names.extend(cat_features.tolist())
-                    print(f"   ✓ Added {len(cat_features)} one-hot encoded features")
+                    logger.debug(f"   ✓ Added {len(cat_features)} one-hot encoded features")
                 else:
                     # OrdinalEncoder keeps column structure but may have indicator columns
                     feature_names.extend(actual_columns)
-                    print(f"   ✓ Added {len(actual_columns)} categorical features (ordinal encoded)")
+                    logger.debug(f"   ✓ Added {len(actual_columns)} categorical features (ordinal encoded)")
             elif name == 'text':
                 # Text vectorizer creates TF-IDF features
                 vectorizer = transformer.named_steps['vectorizer']
                 if hasattr(vectorizer, 'feature_names_'):
                     text_features = vectorizer.feature_names_
                     feature_names.extend(text_features)
-                    print(f"   ✓ Added {len(text_features)} text features (TF-IDF)")
+                    logger.debug(f"   ✓ Added {len(text_features)} text features (TF-IDF)")
                 else:
-                    print(f"   ⚠️ Text vectorizer not fitted yet")
+                    logger.debug(f"   ⚠️ Text vectorizer not fitted yet")
         
-        print(f"\n   Total feature names: {len(feature_names)}")
-        print(f"{'='*80}\n")
+        logger.debug(f"\n   Total feature names: {len(feature_names)}")
+        logger.debug(f"{'='*80}\n")
         
         return feature_names
     
@@ -3505,13 +3592,13 @@ class AdaptivePreprocessor:
         total_cells = initial_rows * initial_cols
         missing_cells_imputed = sum(detail.get('missing_count', 0) for detail in self.imputation_details)
         
-        print(f"\n{'='*80}")
-        print(f"🔍 DEBUG: Quality Metrics Calculation")
-        print(f"   Imputation details count: {len(self.imputation_details)}")
+        logger.debug(f"\n{'='*80}")
+        logger.debug(f"🔍 DEBUG: Quality Metrics Calculation")
+        logger.debug(f"   Imputation details count: {len(self.imputation_details)}")
         for detail in self.imputation_details:
-            print(f"   - {detail['column']}: {detail['missing_count']} ({detail['type']})")
-        print(f"   Total missing cells imputed: {missing_cells_imputed}")
-        print(f"{'='*80}\n")
+            logger.debug(f"   - {detail['column']}: {detail['missing_count']} ({detail['type']})")
+        logger.debug(f"   Total missing cells imputed: {missing_cells_imputed}")
+        logger.debug(f"{'='*80}\n")
         
         quality_score = 100.0
         quality_score -= (missing_cells_imputed / total_cells) * 30  # Penalty for missing data

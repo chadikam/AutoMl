@@ -277,6 +277,13 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
             target_column = preprocessing_summary.get("target_column")
 
             if has_train_test_split and train_size > 0:
+                # Validate row counts match expected split sizes
+                total_expected = train_size + test_size
+                if total_expected > len(df):
+                    training_manager.add_log(f"⚠️ Row count mismatch: expected {total_expected} but file has {len(df)} rows. Ignoring pre-split.")
+                    has_train_test_split = False
+
+            if has_train_test_split and train_size > 0:
                 df_train = df.iloc[:train_size].copy()
                 df_test = df.iloc[train_size:train_size + test_size].copy()
 
@@ -413,10 +420,12 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
                 )
                 preprocessing_results = preprocessor.fit_transform(
                     df=df, target_column=request.target_column,
-                    model_type=None, test_size=0, random_state=42
+                    model_type=None, test_size=request.config.test_size, random_state=42
                 )
                 X_transformed = preprocessing_results['X_train']
                 y = preprocessing_results['y_train']
+                X_test = preprocessing_results.get('X_test')
+                y_test = preprocessing_results.get('y_test')
                 feature_names = preprocessing_results['feature_names']
                 preprocessing_pipeline = preprocessor.pipeline
                 preprocessing_metadata = preprocessing_results.get('preprocessing_metadata', {})
@@ -440,25 +449,47 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
                     transformers.append(('num', StandardScaler(), numeric_features))
                 if categorical_features:
                     transformers.append(('cat', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), categorical_features))
+
+                # CRITICAL: Split BEFORE preprocessing to prevent data leakage
+                y_arr = y.values if hasattr(y, 'values') else y
+                stratify_param = y_arr if request.task_type == AutoMLTaskType.CLASSIFICATION else None
+                from sklearn.model_selection import train_test_split as basic_split
+                try:
+                    X_train_raw, X_test_raw, y_train_basic, y_test_basic = basic_split(
+                        X, y_arr, test_size=request.config.test_size, random_state=42,
+                        stratify=stratify_param
+                    )
+                except ValueError:
+                    # Stratification failed (e.g., too few samples in a class)
+                    X_train_raw, X_test_raw, y_train_basic, y_test_basic = basic_split(
+                        X, y_arr, test_size=request.config.test_size, random_state=42
+                    )
+
                 if transformers:
                     preprocessor_obj = ColumnTransformer(transformers=transformers)
-                    X_transformed = preprocessor_obj.fit_transform(X)
+                    X_transformed = preprocessor_obj.fit_transform(X_train_raw)
+                    X_test_transformed = preprocessor_obj.transform(X_test_raw)
                 else:
-                    X_transformed = X.values
+                    preprocessor_obj = None
+                    X_transformed = X_train_raw.values
+                    X_test_transformed = X_test_raw.values
                 feature_names = []
                 if numeric_features:
                     feature_names.extend(numeric_features)
-                if categorical_features and transformers:
-                    cat_encoder = transformers[1][1] if len(transformers) > 1 else transformers[0][1]
-                    if hasattr(cat_encoder, 'get_feature_names_out'):
-                        feature_names.extend(cat_encoder.get_feature_names_out(categorical_features).tolist())
+                if categorical_features and preprocessor_obj is not None:
+                    try:
+                        cat_encoder = preprocessor_obj.named_transformers_['cat']
+                        if hasattr(cat_encoder, 'get_feature_names_out'):
+                            feature_names.extend(cat_encoder.get_feature_names_out(categorical_features).tolist())
+                    except (KeyError, AttributeError):
+                        feature_names.extend(categorical_features)
                 elif categorical_features:
                     feature_names.extend(categorical_features)
-                y = y.values if hasattr(y, 'values') else y
-                preprocessing_pipeline = None
+                y = y_train_basic
+                preprocessing_pipeline = preprocessor_obj
                 preprocessing_metadata = {}
                 preprocessing_method = "basic"
-                X_test, y_test = None, None
+                X_test, y_test = X_test_transformed, y_test_basic
 
         training_manager.add_log(f"Preprocessed: {len(feature_names)} features, {len(X_transformed)} samples")
 
@@ -499,7 +530,7 @@ async def _run_training_async(training_id: str, request: AutoMLTrainRequest):
             # Fallback to classification (unsupervised is gated by feature flag above)
             task_type = TaskType.CLASSIFICATION
 
-        use_presplit_data = is_preprocessed and X_test is not None
+        use_presplit_data = X_test is not None and y_test is not None
 
         engine = AutoMLEngine(
             task_type=task_type,
@@ -1321,10 +1352,18 @@ async def predict(model_id: str, input_data: dict):
             else:
                 X_input = input_df.values
         else:
-            # Direct feature vector
+            # Direct feature vector — validate input features
+            missing_features = [f for f in feature_names if f not in input_data]
+            extra_features = [f for f in input_data.keys() if f not in feature_names]
+            
+            if missing_features:
+                logger.warning(f"Predict: {len(missing_features)} missing features will default to 0: {missing_features[:5]}")
+            if extra_features:
+                logger.warning(f"Predict: {len(extra_features)} extra features in input will be ignored: {extra_features[:5]}")
+            
             X_input = np.array([[
                 float(input_data.get(f, 0)) if f not in categorical_features
-                else input_data.get(f, 0)
+                else input_data.get(f, '')
                 for f in feature_names
             ]])
         

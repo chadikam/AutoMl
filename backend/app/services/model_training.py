@@ -87,7 +87,8 @@ class ModelTrainingService:
             Tuple of (X_train, X_test, y_train, y_test)
         """
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-            X, y, test_size=test_size, random_state=random_state, stratify=y
+            X, y, test_size=test_size, random_state=random_state,
+            stratify=y if len(np.unique(y)) < max(20, len(y) * 0.05) else None
         )
         
         return self.X_train, self.X_test, self.y_train, self.y_test
