@@ -15,8 +15,9 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Data directory
-DATA_DIR = Path(__file__).parent.parent / "data"
+# Data directory — writable at runtime (not inside the frozen bundle)
+from app.paths import get_runtime_path
+DATA_DIR = get_runtime_path("data")
 
 
 def _json_serializer(obj):
